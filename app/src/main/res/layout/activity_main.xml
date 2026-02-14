@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/gradient_background"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="32dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="48dp"
+        android:text="@string/main_title"
+        android:textColor="@android:color/white"
+        android:textSize="40sp"
+        android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/kami"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:layout_marginBottom="24dp"
+        android:autofillHints="name"
+        android:background="@drawable/edittext_background"
+        android:hint="@string/activation_code_hint"
+        android:inputType="text"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp" />
+
+    <Button
+        android:id="@+id/login_button"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:background="@drawable/button_background"
+        android:onClick="login"
+        android:text="@string/login_button"
+        android:textColor="@android:color/white"
+        android:textStyle="bold" />
+
+    <!-- 【新增】协议勾选区域 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="16dp">
+
+        <CheckBox
+            android:id="@+id/cb_agree"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:theme="@style/WhiteCheckBox"
+            android:minWidth="0dp"
+            android:minHeight="0dp"/>
+
+        <TextView
+            android:id="@+id/tv_agreement"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="我已知晓并同意&lt;使用条款&gt;"
+            android:textColor="#DDDDDD"
+            android:textSize="13sp"
+            android:layout_marginStart="4dp"/>
+    </LinearLayout>
+
+</LinearLayout>

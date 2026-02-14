@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F7FA"
+    tools:context=".NewActivity">
+
+    <!-- ======================= -->
+    <!-- 界面 1: 权限授权页       -->
+    <!-- ======================= -->
+    <ScrollView
+        android:id="@+id/layout_permission_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:padding="20dp"
+        android:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hi You!"
+                android:textColor="#333333"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:layout_marginTop="40dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="请选择一种方式授予文件访问权限"
+                android:textColor="#888888"
+                android:textSize="14sp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="30dp"/>
+
+            <!-- 卡片 1: 安卓授权 -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="4dp"
+                app:cardBackgroundColor="#FFFFFF"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="方案 A: 安卓原生授权 (SAF)"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#2196F3"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="免Root，通过系统文件选择器授权，少部分旧设备支持"
+                        android:textColor="#666666"
+                        android:textSize="13sp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="12dp"/>
+                    <Button
+                        android:id="@+id/button_android_auth"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="去授权"
+                        android:backgroundTint="#2196F3"
+                        android:textColor="#FFFFFF"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- 卡片 2: Shizuku -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="4dp"
+                app:cardBackgroundColor="#FFFFFF"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="方案 B: Shizuku 授权"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#4CAF50"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="推荐方案：需要已激活 Shizuku，全安卓设备通用，需提前下载配置好shizuku，可哔哩哔哩搜索使用方案"
+                        android:textColor="#666666"
+                        android:textSize="13sp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="12dp"/>
+                    <Button
+                        android:id="@+id/button_shizuku"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="请求权限"
+                        android:backgroundTint="#4CAF50"
+                        android:textColor="#FFFFFF"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- 卡片 3: Root -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="4dp"
+                app:cardBackgroundColor="#FFFFFF"
+                android:layout_marginBottom="20dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="方案 C: Root 权限"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#FF5722"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="最高权限，直接读写所有文件。"
+                        android:textColor="#666666"
+                        android:textSize="13sp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="12dp"/>
+                    <Button
+                        android:id="@+id/button_root"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="检查 Root"
+                        android:backgroundTint="#FF5722"
+                        android:textColor="#FFFFFF"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <TextView
+                android:id="@+id/permission_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="当前状态：未获取权限"
+                android:textColor="#F44336"
+                android:textSize="14sp"
+                android:padding="10dp"/>
+
+            <!-- 【新增】跳过权限入口 -->
+            <TextView
+                android:id="@+id/tv_skip_auth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="暂无权限，继续使用其他功能 >"
+                android:textColor="#9E9E9E"
+                android:textSize="14sp"
+                android:padding="15dp"
+                android:layout_marginBottom="30dp"/>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ======================= -->
+    <!-- 界面 2: 功能操作页       -->
+    <!-- ======================= -->
+    <ScrollView
+        android:id="@+id/layout_action_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:padding="16dp"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="功能列表"
+                android:textColor="#333333"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:layout_marginTop="30dp"
+                android:layout_marginBottom="20dp"/>
+
+            <!-- 功能卡片 1: 删除文件 -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="6dp"
+                app:cardBackgroundColor="#FFFFFF"
+                android:layout_marginBottom="20dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="清理"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#E91E63"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="重置全部的操作，不干净就重新卸载安装球球"
+                        android:textColor="#888888"
+                        android:textSize="12sp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="16dp"/>
+                    <Button
+                        android:id="@+id/button_delete_file"
+                        android:layout_width="match_parent"
+                        android:layout_height="50dp"
+                        android:text="执行一键删除"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:backgroundTint="#E91E63"
+                        android:textColor="#FFFFFF"
+                        app:cornerRadius="10dp"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- 功能卡片 2: 资源注入 -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="6dp"
+                app:cardBackgroundColor="#FFFFFF"
+                android:layout_marginBottom="20dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="资源注入"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#673AB7"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="待更新，目前想到自定义皮肤和修改录音"
+                        android:textColor="#888888"
+                        android:textSize="12sp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="12dp"/>
+                    <GridLayout
+                        android:id="@+id/grid_layout_functions"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:columnCount="3"
+                        android:rowCount="4"
+                        android:alignmentMode="alignMargins"
+                        android:useDefaultMargins="true">
+                    </GridLayout>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- 【新增】功能页的“其他功能”入口 -->
+            <TextView
+                android:id="@+id/tv_goto_other"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="其他功能 >"
+                android:textColor="#2196F3"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:padding="15dp"
+                android:layout_marginBottom="30dp"/>
+
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

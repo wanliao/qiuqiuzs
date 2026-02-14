@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">球球小助手</string>
+    <string name="main_title">球球小助手</string>
+    <string name="activation_code_hint">请输入激活码</string>
+    <string name="login_button">登录</string>
+    <string name="permission_status_granted">已获取权限</string>
+    <string name="permission_status_denied">未获取权限</string>
+    <string name="shizuku_not_running">Shizuku 服务未运行</string>
+</resources>
