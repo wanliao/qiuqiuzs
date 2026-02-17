@@ -21,6 +21,7 @@ import androidx.annotation.Nullable;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -71,10 +72,7 @@ public class FloatWindowService extends Service {
         bg.setCornerRadius(dp2px(20));
         layoutContainer.setBackground(bg);
 
-        // 按钮 1: 断网 + 改999
         addButton("断+999", Color.RED, v -> runFunction1());
-
-        // 按钮 2: 切换 8 / 1
         addButton("改8/1", Color.BLUE, v -> runFunction2());
 
         addButton("X", Color.GRAY, v -> {
@@ -124,16 +122,6 @@ public class FloatWindowService extends Service {
         layoutContainer.addView(btn);
     }
 
-    // ==========================================
-    // 核心功能逻辑区
-    // ==========================================
-
-    /**
-     * 功能1: 关闭WiFi/数据 -> 改999 -> 等待3秒 -> 恢复
-     */
-    /**
-     * 功能1: 关闭WiFi/数据 -> 改999 -> 等待3秒 -> 恢复网络 -> 马上改1
-     */
     private void runFunction1() {
         if (targetAddressHex == null || targetAddressHex.isEmpty()) {
             showToast("基址未设置");
@@ -155,21 +143,20 @@ public class FloatWindowService extends Service {
                 // 2. 立即改内存 -> 999.0
                 writeMemoryFloat(pid, targetAddressHex, 999.0f);
 
-                showToast("断网 & 改999 完成，等待3秒...");
+                showToast("断网 & 改999 完成，等待1.5秒...");
 
-                // 3. 延时 3秒
+                // 3. 延时 1.5秒
                 Thread.sleep(1500);
 
                 // 4. 恢复网络
                 executeRootCmd("svc wifi enable");
                 executeRootCmd("svc data enable");
 
-                // 5. 【新增】网络恢复后，立即改回 1.0
+                // 5. 网络恢复后，立即改回 1.0
                 writeMemoryFloat(pid, targetAddressHex, 1.0f);
 
                 showToast("网络已恢复 & 数值已重置为 1");
             } catch (Exception e) {
-                // 异常保护：恢复网络并尝试重置数值
                 executeRootCmd("svc wifi enable");
                 executeRootCmd("svc data enable");
                 if (getProcessID(TARGET_PKG) != -1) {
@@ -180,10 +167,6 @@ public class FloatWindowService extends Service {
         }).start();
     }
 
-
-    /**
-     * 功能2: 切换改 8.0 / 1.0
-     */
     private void runFunction2() {
         if (targetAddressHex == null || targetAddressHex.isEmpty()) {
             showToast("基址未设置");
@@ -192,37 +175,34 @@ public class FloatWindowService extends Service {
 
         new Thread(() -> {
             int pid = getProcessID(TARGET_PKG);
-
-
             float val = isToggleStateOne ? 8.0f : 1.0f;
             boolean success = writeMemoryFloat(pid, targetAddressHex, val);
 
             if (success) {
                 showToast("已修改为 " + val);
-                isToggleStateOne = !isToggleStateOne; // 切换状态
+                isToggleStateOne = !isToggleStateOne;
             } else {
                 showToast("修改失败");
             }
         }).start();
     }
 
-    // --- 内存写入工具 ---
-
+    // --- 【修改核心】内存写入工具：解决 echo -n 写入无效的问题 ---
     private boolean writeMemoryFloat(int pid, String hexAddress, float value) {
         try {
             long address = new BigInteger(hexAddress, 16).longValue();
 
-            // Float 转 hex string (Little Endian)
+            // 将浮点数转换为 4个字节（小端序）
             byte[] bytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(value).array();
-            StringBuilder hexString = new StringBuilder();
-            for (byte b : bytes) {
-                hexString.append(String.format("\\x%02x", b));
-            }
 
-            // dd 命令写入
-            String cmd = "echo -n -e '" + hexString.toString() + "' | dd of=/proc/" + pid + "/mem bs=1 seek=" + address + " count=4 conv=notrunc";
+            // 直接将字节流灌给 dd 命令的标准输入，绝对稳定
+            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "dd of=/proc/" + pid + "/mem bs=1 seek=" + address + " count=4 conv=notrunc 2>/dev/null"});
+            OutputStream out = p.getOutputStream();
+            out.write(bytes);
+            out.flush();
+            out.close(); // 关闭流表示写入结束，dd 会自动写完 4 bytes 然后结束
+            p.waitFor();
 
-            executeRootCmd(cmd);
             return true;
         } catch (Exception e) {
             e.printStackTrace();
