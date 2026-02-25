@@ -21,6 +21,14 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.debug
+            // 1. 开启代码混淆、压缩和优化
+            minifyEnabled true
+
+            // 2. 开启资源压缩（可选，建议开启）
+            shrinkResources true
+
+            // 3. 配置混淆规则文件
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 

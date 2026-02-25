@@ -42,7 +42,7 @@ public class OtherActivity extends AppCompatActivity {
     private long lastQueryTime = 0;
 
     // API 地址
-    private static final String API_URL = "http://85.137.247.39:8080/?user=";
+    private static final String API_URL = "http://156.243.244.97:8888/?user=";
 
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS) // 延长超时到10秒
