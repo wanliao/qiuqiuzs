@@ -65,7 +65,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="免Root，通过系统文件选择器授权，少部分旧设备支持"
+                        android:text="通过系统文件选择器授权，安卓11及以下支持"
                         android:textColor="#666666"
                         android:textSize="13sp"
                         android:layout_marginTop="4dp"
@@ -271,7 +271,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="待更新，目前想到自定义皮肤和修改录音"
+                        android:text="待更新"
                         android:textColor="#888888"
                         android:textSize="12sp"
                         android:layout_marginTop="4dp"
