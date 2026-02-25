@@ -1,67 +1,120 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/gradient_background"
-    android:gravity="center"
-    android:orientation="vertical"
-    android:padding="32dp">
+    android:background="@drawable/bg_main_fresh"
+    android:clipChildren="false">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="48dp"
-        android:text="@string/main_title"
-        android:textColor="@android:color/white"
-        android:textSize="40sp"
-        android:textStyle="bold" />
+    <View
+        android:layout_width="280dp"
+        android:layout_height="280dp"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentEnd="true"
+        android:layout_marginTop="-80dp"
+        android:layout_marginEnd="-80dp"
+        android:background="@drawable/bg_circle_decor" />
 
-    <EditText
-        android:id="@+id/kami"
-        android:layout_width="match_parent"
-        android:layout_height="50dp"
-        android:layout_marginBottom="24dp"
-        android:autofillHints="name"
-        android:background="@drawable/edittext_background"
-        android:hint="@string/activation_code_hint"
-        android:inputType="text"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp" />
+    <View
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:layout_alignParentBottom="true"
+        android:layout_alignParentStart="true"
+        android:layout_marginStart="-60dp"
+        android:layout_marginBottom="-50dp"
+        android:background="@drawable/bg_circle_decor" />
 
-    <Button
-        android:id="@+id/login_button"
-        android:layout_width="match_parent"
-        android:layout_height="50dp"
-        android:background="@drawable/button_background"
-        android:onClick="login"
-        android:text="@string/login_button"
-        android:textColor="@android:color/white"
-        android:textStyle="bold" />
-
-    <!-- 【新增】协议勾选区域 -->
-    <LinearLayout
+    <androidx.cardview.widget.CardView
+        android:id="@+id/card_login"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginTop="16dp">
+        android:layout_centerInParent="true"
+        android:layout_marginHorizontal="28dp"
+        app:cardBackgroundColor="#FFFFFF"
+        app:cardCornerRadius="32dp"
+        app:cardElevation="8dp">
 
-        <CheckBox
-            android:id="@+id/cb_agree"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:theme="@style/WhiteCheckBox"
-            android:minWidth="0dp"
-            android:minHeight="0dp"/>
+            android:orientation="vertical"
+            android:paddingHorizontal="32dp"
+            android:paddingTop="48dp"
+            android:paddingBottom="40dp">
 
-        <TextView
-            android:id="@+id/tv_agreement"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="我已知晓并同意&lt;使用条款&gt;"
-            android:textColor="#DDDDDD"
-            android:textSize="13sp"
-            android:layout_marginStart="4dp"/>
-    </LinearLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:text="球球小助手"
+                android:textColor="#222222"
+                android:textSize="28sp"
+                android:textStyle="bold" />
 
-</LinearLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="40dp"
+                android:text="欢迎回来，请登录以继续"
+                android:textColor="#999999"
+                android:textSize="14sp" />
+
+            <EditText
+                android:id="@+id/kami"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginBottom="28dp"
+                android:autofillHints="name"
+                android:background="@drawable/bg_input_modern"
+                android:hint="@string/activation_code_hint"
+                android:inputType="text"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:textColor="#333333"
+                android:textColorHint="#BBBBBB"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/login_button"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:background="@drawable/bg_btn_modern"
+                android:onClick="login"
+                android:stateListAnimator="@null"
+                android:text="登录"
+                android:textColor="#FFFFFF"
+                android:textSize="19sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="24dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <CheckBox
+                    android:id="@+id/cb_agree"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@null"
+                    android:buttonTint="#4A72FF"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp" />
+
+                <TextView
+                    android:id="@+id/tv_agreement"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="我已知晓并同意&lt;使用条款&gt;"
+                    android:textColor="#999999"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+</RelativeLayout>

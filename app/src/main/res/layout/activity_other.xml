@@ -1,132 +1,184 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F7FA"
-    android:orientation="vertical"
-    android:padding="20dp"
+    android:background="@drawable/bg_main_fresh"
+    android:clipChildren="false"
     tools:context=".OtherActivity">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="20dp"
-        android:layout_marginBottom="20dp"
-        android:text="球球排名查询工具"
-        android:textColor="#333333"
-        android:textSize="24sp"
-        android:textStyle="bold" />
+    <View
+        android:layout_width="280dp"
+        android:layout_height="280dp"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentEnd="true"
+        android:layout_marginTop="-80dp"
+        android:layout_marginEnd="-80dp"
+        android:background="@drawable/bg_circle_decor" />
 
-    <!-- 输入框和按钮区域 -->
-    <androidx.cardview.widget.CardView
+    <View
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:layout_alignParentBottom="true"
+        android:layout_alignParentStart="true"
+        android:layout_marginStart="-60dp"
+        android:layout_marginBottom="-50dp"
+        android:background="@drawable/bg_circle_decor" />
+
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        app:cardBackgroundColor="#FFFFFF"
-        app:cardCornerRadius="12dp"
-        app:cardElevation="4dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingHorizontal="24dp"
+        android:paddingTop="50dp"
+        android:paddingBottom="24dp">
 
-        <LinearLayout
+        <TextView
+            android:id="@+id/tv_other_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="排名查询"
+            android:textColor="#222222"
+            android:textSize="32sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_other_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="28dp"
+            android:text="精准洞察"
+            android:textColor="#999999"
+            android:textSize="14sp" />
+
+        <androidx.cardview.widget.CardView
+            android:id="@+id/card_input_area"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="24dp"
+            app:cardElevation="8dp">
 
-            <EditText
-                android:id="@+id/et_user_input"
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:background="#F0F2F5"
-                android:inputType="text"
-                android:hint="请输入用户名 (支持中/英/数)"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:textColor="#333333"
-                android:textSize="16sp" />
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="24dp">
 
+                <EditText
+                    android:id="@+id/et_user_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="54dp"
+                    android:background="@drawable/bg_input_modern"
+                    android:hint="请输入用户名 (支持中/英/数)"
+                    android:inputType="text"
+                    android:paddingStart="24dp"
+                    android:paddingEnd="24dp"
+                    android:textColor="#333333"
+                    android:textColorHint="#BBBBBB"
+                    android:textSize="15sp" />
 
-            <Button
-                android:id="@+id/btn_query"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:layout_marginTop="12dp"
-                android:backgroundTint="#2196F3"
-                android:text="提交查询"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                app:cornerRadius="8dp" />
+                <Button
+                    android:id="@+id/btn_query"
+                    android:layout_width="match_parent"
+                    android:layout_height="54dp"
+                    android:layout_marginTop="16dp"
+                    android:background="@drawable/bg_btn_modern"
+                    android:stateListAnimator="@null"
+                    android:text="立即查询"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_cooldown_hint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:layout_marginTop="12dp"
+                    android:text="请等待 5 秒后再查询"
+                    android:textColor="#FF9800"
+                    android:textSize="12sp"
+                    android:visibility="invisible" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <RelativeLayout
+            android:id="@+id/layout_console_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp">
 
             <TextView
-                android:id="@+id/tv_cooldown_hint"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:layout_marginTop="8dp"
-                android:text="请等待 5 秒后再查询"
-                android:textColor="#F44336"
-                android:textSize="12sp"
-                android:visibility="invisible"/>
+                android:layout_centerVertical="true"
+                android:text="查询日志"
+                android:textColor="#718096"
+                android:textSize="16sp"
+                android:textStyle="bold" />
 
-        </LinearLayout>
-    </androidx.cardview.widget.CardView>
+            <LinearLayout
+                android:id="@+id/btn_clear_log"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="8dp">
 
-    <!-- 下方结果展示区域 -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:text="查询记录："
-        android:textColor="#666666"
-        android:textSize="14sp" />
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@android:drawable/ic_menu_delete"
+                    app:tint="#FF5252" />
 
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:text="清空"
+                    android:textColor="#FF5252"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </RelativeLayout>
 
-        <!-- 黑色背景的日志框 -->
-        <androidx.cardview.widget.CardView
+        <FrameLayout
+            android:id="@+id/layout_console_body"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            app:cardBackgroundColor="#212121"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="4dp">
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_console_dark"
+            android:elevation="6dp">
 
             <ScrollView
                 android:id="@+id/scroll_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:padding="16dp">
+                android:padding="20dp"
+                android:scrollbars="none">
 
                 <TextView
                     android:id="@+id/tv_result_log"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:lineSpacingExtra="6dp"
-                    android:text="等待查询..."
-                    android:textColor="#00E676"
-                    android:textSize="14sp"
                     android:fontFamily="monospace"
-                    android:textIsSelectable="true" />
+                    android:lineSpacingExtra="8dp"
+                    android:text="等待查询..."
+                    android:textColor="#00F2FE"
+                    android:textIsSelectable="true"
+                    android:textSize="13sp" />
 
             </ScrollView>
-        </androidx.cardview.widget.CardView>
-
-        <!-- 右下角悬浮清空按钮 -->
-        <com.google.android.material.floatingactionbutton.FloatingActionButton
-            android:id="@+id/btn_clear_log"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|end"
-            android:layout_margin="16dp"
-            android:contentDescription="清空"
-            android:src="@android:drawable/ic_menu_delete"
-            app:backgroundTint="#FF5722"
-            app:tint="#FFFFFF"
-            app:elevation="6dp"/>
-    </FrameLayout>
-
-</LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+</RelativeLayout>

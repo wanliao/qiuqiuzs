@@ -1,10 +1,14 @@
 package com.mei.hua;
 
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ScrollView;
@@ -38,7 +42,7 @@ public class OtherActivity extends AppCompatActivity {
     private View btnClearLog;
 
     // 冷却时间控制
-    private static final long COOLDOWN_MS = 5000;
+    private static final long COOLDOWN_MS = 8000;
     private long lastQueryTime = 0;
 
     // API 地址
@@ -52,6 +56,16 @@ public class OtherActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // === 美化特效：沉浸式状态栏 ===
+        Window window = getWindow();
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR); // 状态栏黑色文字
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        window.setStatusBarColor(Color.TRANSPARENT);
+
         setContentView(R.layout.activity_other);
 
         etUserInput = findViewById(R.id.et_user_input);
@@ -63,6 +77,28 @@ public class OtherActivity extends AppCompatActivity {
 
         btnQuery.setOnClickListener(v -> performQuery());
         btnClearLog.setOnClickListener(v -> clearLog());
+
+        // === 美化特效：丝滑进场动画 ===
+        View title = findViewById(R.id.tv_other_title);
+        View subtitle = findViewById(R.id.tv_other_subtitle);
+        View cardInput = findViewById(R.id.card_input_area);
+        View consoleHeader = findViewById(R.id.layout_console_header);
+        View consoleBody = findViewById(R.id.layout_console_body);
+
+        View[] animViews = {title, subtitle, cardInput, consoleHeader, consoleBody};
+        for (int i = 0; i < animViews.length; i++) {
+            if (animViews[i] != null) {
+                animViews[i].setTranslationY(80f);
+                animViews[i].setAlpha(0f);
+                animViews[i].animate()
+                        .translationY(0f)
+                        .alpha(1f)
+                        .setDuration(600)
+                        .setStartDelay(i * 80L) // 依次浮现，节奏感极佳
+                        .setInterpolator(new DecelerateInterpolator(1.5f))
+                        .start();
+            }
+        }
     }
 
     private void performQuery() {
@@ -86,7 +122,7 @@ public class OtherActivity extends AppCompatActivity {
         btnQuery.setEnabled(false);
         btnQuery.setText("查询中...");
 
-        // 【关键修复】对中文参数进行 URL 编码
+        // 对中文参数进行 URL 编码
         String encodedInput = input;
         try {
             encodedInput = URLEncoder.encode(input, "UTF-8");
@@ -96,16 +132,12 @@ public class OtherActivity extends AppCompatActivity {
 
         String url = API_URL + encodedInput;
 
-        // 打印一下 URL 方便调试 (在 Logcat 可以看到)
-        // android.util.Log.d("API_QUERY", "Request URL: " + url);
-
         Request request = new Request.Builder().url(url).build();
 
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
                 runOnUiThread(() -> {
-                    // 如果这里报错，通常是网络不通或者没有加 usesCleartextTraffic
                     Toast.makeText(OtherActivity.this, "请求失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
                     resetButton();
                 });
@@ -144,11 +176,11 @@ public class OtherActivity extends AppCompatActivity {
             String logEntry;
 
             if (code == 200) {
-                // 成功: id：username，加上排名：uid
-                logEntry = String.format("[%s]\nID：%s——排名：%s", time, username, uid);
+                // 成功
+                logEntry = String.format("[%s]\nID：%s\n排名：%s", time, username, uid);
                 Toast.makeText(this, "查询成功", Toast.LENGTH_SHORT).show();
             } else if (code == 404) {
-                // 失败: 未查找到用户名
+                // 失败
                 logEntry = String.format("[%s] 未查找到用户名: %s", time, username);
             } else {
                 // 其他情况
@@ -159,7 +191,6 @@ public class OtherActivity extends AppCompatActivity {
 
         } catch (Exception e) {
             e.printStackTrace();
-            // 如果返回的不是标准 JSON，显示原始数据方便排查
             Toast.makeText(this, "数据解析异常", Toast.LENGTH_SHORT).show();
             appendLog("[系统] 解析错误: " + jsonStr);
         }
@@ -182,12 +213,12 @@ public class OtherActivity extends AppCompatActivity {
 
     private void resetButton() {
         btnQuery.setEnabled(true);
-        btnQuery.setText("提交查询");
+        btnQuery.setText("立即查询");
     }
 
     private void showCooldownTimer() {
         tvCooldownHint.setVisibility(View.VISIBLE);
-        tvCooldownHint.setText("冷却中 (5s)");
+        tvCooldownHint.setText("冷却中 (8s)");
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (!isDestroyed()) tvCooldownHint.setVisibility(View.INVISIBLE);
         }, COOLDOWN_MS);

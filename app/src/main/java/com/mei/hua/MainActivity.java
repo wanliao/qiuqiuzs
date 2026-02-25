@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.SpannableString;
@@ -14,15 +15,21 @@ import android.text.TextPaint;
 import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.Response;
+
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 
@@ -31,10 +38,8 @@ import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.GregorianCalendar;
-import java.util.Objects;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -70,11 +75,32 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // 【UI特效】沉浸式状态栏：让顶部状态栏透明，和背景渐变融为一体
+        Window window = getWindow();
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR); // 状态栏黑色文字
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        window.setStatusBarColor(Color.TRANSPARENT);
+
         setContentView(R.layout.activity_main);
 
         kami = findViewById(R.id.kami);
         cbAgree = findViewById(R.id.cb_agree);
         tvAgreement = findViewById(R.id.tv_agreement);
+
+        // 【UI特效】卡片进场动画：启动时卡片从下方平滑升起并淡入
+        View cardLogin = findViewById(R.id.card_login);
+        cardLogin.setTranslationY(150f);
+        cardLogin.setAlpha(0f);
+        cardLogin.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(800)
+                .setInterpolator(new DecelerateInterpolator(1.5f))
+                .start();
 
         // 1. 初始化协议文本链接
         initAgreementText();
@@ -102,7 +128,8 @@ public class MainActivity extends AppCompatActivity {
         update();
     }
 
-    // 设置富文本：让“<使用条款>”变蓝且可点击
+    // 设置富文本：让“<使用条款>”变色且可点击
+    // 设置富文本：让“<使用条款>”变色且可点击
     private void initAgreementText() {
         String fullText = "我已知晓并同意<使用条款>";
         SpannableString ss = new SpannableString(fullText);
@@ -117,15 +144,16 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void updateDrawState(@NonNull TextPaint ds) {
                 super.updateDrawState(ds);
-                ds.setColor(Color.parseColor("#2196F3")); // 设置蓝色
+                // 【UI修改】配合新的高级蓝按钮，将协议链接颜色改为 #4A72FF
+                ds.setColor(Color.parseColor("#4A72FF"));
                 ds.setUnderlineText(false); // 去掉下划线
+                ds.setFakeBoldText(true);   // 加粗一点点显得更精致
             }
         };
 
         ss.setSpan(clickableSpan, 7, 13, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         tvAgreement.setText(ss);
         tvAgreement.setMovementMethod(LinkMovementMethod.getInstance()); // 必须设置这个才能点击
-        // 设置高亮颜色透明，防止点击时有背景色
         tvAgreement.setHighlightColor(Color.TRANSPARENT);
     }
 
@@ -138,7 +166,7 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    // 检测更新 (保持不变)
+    // 检测更新 (核心逻辑未改动)
     public void update() {
         Http.get(WEIURL + "/api/?id=ini&app=" + WEIAID, new Callback() {
             @Override
@@ -201,9 +229,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 验证激活
+    // 验证激活 (核心逻辑未改动)
+    @SuppressLint("HardwareIds")
     public void login(View view) {
-        // 【新增】检查是否勾选协议
         if (!cbAgree.isChecked()) {
             Toast.makeText(this, "请先阅读并同意《使用条款》", Toast.LENGTH_SHORT).show();
             return;
@@ -215,7 +243,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String ANDROID_ID = Settings.System.getString(getContentResolver(), Settings.System.ANDROID_ID);
+        String ANDROID_ID = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
         long TIME = new Date().getTime();
         double VALUE = 1 + Math.random() * (10 - 1 + 1) + TIME;
         String SIGN = stringToMD5("kami=" + codeText + "&markcode=" + ANDROID_ID + "&t=" + TIME + "&" + WEIKEY);
@@ -268,7 +296,6 @@ public class MainActivity extends AppCompatActivity {
 
                                     GregorianCalendar time_vip = new GregorianCalendar();
                                     time_vip.setTimeInMillis(Long.parseLong(vip) * 1000);
-
 
                                 } else {
                                     Toast.makeText(MainActivity.this, "数据校验失败", Toast.LENGTH_SHORT).show();
