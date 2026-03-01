@@ -132,7 +132,7 @@ public class FloatWindowService extends Service {
         titleBar.setPadding(dp2px(10), dp2px(5), dp2px(10), dp2px(5));
 
         TextView tvTitle = new TextView(this);
-        tvTitle.setText("小助手菜单");
+        tvTitle.setText("06.03.01");
         tvTitle.setTextColor(COLOR_TEXT);
         tvTitle.setTextSize(12);
         tvTitle.getPaint().setFakeBoldText(true);
@@ -170,6 +170,7 @@ public class FloatWindowService extends Service {
         contentArea.addView(createExitButtonBlock());
         contentArea.addView(createFov2ControlBlock("视野1"));
         contentArea.addView(createFovControlBlock("视野2"));
+
 
         floatingMenu.addView(contentArea);
     }
@@ -284,7 +285,39 @@ public class FloatWindowService extends Service {
         });
         return checkBox;
     }
+    /**
+     * 解连吐模块 (单次写入 Float)
+     */
+    private View createFastSpitBlock(String title) {
+        CheckBox checkBox = new CheckBox(this);
+        checkBox.setText(title);
+        checkBox.setTextColor(COLOR_TEXT);
+        checkBox.setTextSize(13);
+        checkBox.setPadding(0, dp2px(5), 0, dp2px(5));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            checkBox.setButtonTintList(ColorStateList.valueOf(COLOR_ACCENT));
+        }
 
+        // 填入你给的 libil2cpp.so 锁链
+        final long[] offsets = {0x157518L, 0x850L, 0xC8L, 0x85CL};
+
+        checkBox.setOnCheckedChangeListener((btn, isChecked) -> {
+            if (isChecked) {
+                // 开启时写入 -1.0f
+                MemoryManager.writePointerChainFloatOnceFromBase(
+                        FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, -1.0f
+                );
+            } else {
+                // 取消勾选时，恢复游戏的默认吐球 CD。
+                // 我这里先写了 0.1f，你可以根据游戏实际的正常数值自行修改
+                MemoryManager.writePointerChainFloatOnceFromBase(
+                        FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, 0.1f
+                );
+            }
+        });
+
+        return checkBox;
+    }
     private void collapseMenu() {
         floatingMenu.setVisibility(View.GONE);
         floatingBall.setVisibility(View.VISIBLE);
@@ -534,4 +567,5 @@ public class FloatWindowService extends Service {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) { return null; }
+
 }

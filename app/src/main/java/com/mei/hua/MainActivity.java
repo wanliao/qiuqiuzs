@@ -49,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
     String WEIKEY = "w6bf22ad03ec445293fa400d9b7cb25";
     String RC4KEY = "pcec1bd6e6de1083215cecda4ae5284";
     String DLCODE = "200";
-    String EDITION = "1.0";
+    String EDITION = "0.0";
 
     // 免责声明文本
     private static final String DISCLAIMER_TEXT =

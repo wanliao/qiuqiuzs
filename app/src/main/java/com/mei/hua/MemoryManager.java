@@ -209,6 +209,58 @@ public class MemoryManager {
             }
         }).start();
     }
+    /**
+     * 获取模块的绝对头部基址 (专用于 libil2cpp.so + 偏移 这种没有 bss 的锁链)
+     */
+    public static long getFirstModuleBase(int pid, String moduleName) {
+        try {
+            Process p = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            // head -n 1 确保只获取这个模块在内存中的第一条记录
+            os.writeBytes("cat /proc/" + pid + "/maps | grep " + moduleName + " | head -n 1\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line = reader.readLine();
+            if (line != null && !line.isEmpty()) {
+                String[] parts = line.trim().split("\\s+")[0].split("-");
+                return new BigInteger(parts[0], 16).longValue();
+            }
+        } catch (Exception e) {}
+        return 0;
+    }
+
+    /**
+     * 从头部基址解链并单次写入 Float
+     */
+    public static void writePointerChainFloatOnceFromBase(Context context, String pkgName, String moduleName, long[] offsets, float finalValue) {
+        new Thread(() -> {
+            int pid = getProcessID(pkgName);
+            if (pid == -1) return;
+
+            long base = getFirstModuleBase(pid, moduleName);
+            if (base == 0) return;
+
+            long currentAddr = base + offsets[0];
+            boolean isValidChain = true;
+
+            for (int j = 1; j < offsets.length; j++) {
+                long nextPtr = readPointer64(pid, currentAddr);
+                if (nextPtr == 0) {
+                    isValidChain = false;
+                    break;
+                }
+                currentAddr = nextPtr + offsets[j];
+            }
+
+            if (isValidChain && currentAddr != 0) {
+                writeMemoryFloat(pid, currentAddr, finalValue);
+                new Handler(Looper.getMainLooper()).post(() ->
+                        Toast.makeText(context, "解连吐已修改", Toast.LENGTH_SHORT).show()
+                );
+            }
+        }).start();
+    }
     public static void startFreezePointerChain(Context context, String key, String pkgName, String moduleName, long[] offsets, int finalValue) {
         stopFreeze(key);
 
