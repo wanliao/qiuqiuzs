@@ -20,6 +20,8 @@ import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.view.ViewGroup;
+import android.widget.Button;
 
 import androidx.annotation.Nullable;
 
@@ -132,7 +134,7 @@ public class FloatWindowService extends Service {
         titleBar.setPadding(dp2px(10), dp2px(5), dp2px(10), dp2px(5));
 
         TextView tvTitle = new TextView(this);
-        tvTitle.setText("06.03.01");
+        tvTitle.setText("6-3-1");
         tvTitle.setTextColor(COLOR_TEXT);
         tvTitle.setTextSize(12);
         tvTitle.getPaint().setFakeBoldText(true);
@@ -166,6 +168,8 @@ public class FloatWindowService extends Service {
         contentArea.setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10));
 
         // 加载功能模块
+        // ... 之前添加的视野扩大等功能
+        contentArea.addView(createTimeJumpBlock("时间跳跃"));
         contentArea.addView(createSpeedControlBlock("全局变速"));
         contentArea.addView(createExitButtonBlock());
         contentArea.addView(createFov2ControlBlock("视野1"));
@@ -255,7 +259,7 @@ public class FloatWindowService extends Service {
      */
     private View createExitButtonBlock() {
         CheckBox checkBox = new CheckBox(this);
-        checkBox.setText("退出按钮 (带基址追踪调试)");
+        checkBox.setText("退出按钮(内存版)");
         checkBox.setTextColor(COLOR_TEXT);
         checkBox.setTextSize(13);
         checkBox.setPadding(0, dp2px(5), 0, dp2px(5));
@@ -567,5 +571,141 @@ public class FloatWindowService extends Service {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) { return null; }
+
+// ==========================================
+    // 新增：时间跳跃模块 (时间欺骗)
+    // ==========================================
+
+    /**
+     * 辅助执行独立 Root 命令
+     */
+    private void execRootCmd(String cmd) {
+        try {
+            Process p = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
+            os.writeBytes(cmd + "\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            p.waitFor();
+            os.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 创建时间跳跃按钮模块
+     */
+    // ==========================================
+    // 新增：拟态魔法按钮版 时间跳跃 (带状态反馈 + 始终圆角)
+    // ==========================================
+
+    /**
+     * 生成一个可以始终保持圆角的 GradientDrawable 背景
+     */
+    private android.graphics.drawable.GradientDrawable createMagicBg(int solidColor, int strokeColor, int cornerRadius) {
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(solidColor);
+        bg.setCornerRadius(cornerRadius);
+        // 加上一层淡淡的高光描边，增加拟态质感
+        bg.setStroke(dp2px(2), strokeColor);
+        return bg;
+    }
+
+    /**
+     * 创建高级拟态魔法时间跳跃按钮
+     */
+    /**
+     * 创建高级拟态魔法时间跳跃按钮 (1分钟版)
+     */
+    private View createTimeJumpBlock(String title) {
+        LinearLayout blockLayout = new LinearLayout(this);
+        blockLayout.setOrientation(LinearLayout.VERTICAL);
+        blockLayout.setPadding(0, dp2px(10), 0, dp2px(15));
+
+        Button btnJump = new Button(this);
+        // 修改为 +1 分钟
+        btnJump.setText("✨ " + title);
+        btnJump.setTextColor(Color.WHITE);
+        btnJump.setTextSize(13);
+        btnJump.getPaint().setFakeBoldText(true);
+        btnJump.setStateListAnimator(null);
+
+        // --- 状态背景生成逻辑 ---
+        int radius = dp2px(15);
+        int normalGreen = Color.parseColor("#48BB78");
+        int pressedGreen = Color.parseColor("#68D391");
+        int disabledGray = Color.parseColor("#A0AEC0");
+        int strokeColor = Color.parseColor("#FFFFFF");
+
+        android.graphics.drawable.GradientDrawable defaultBg = new android.graphics.drawable.GradientDrawable();
+        defaultBg.setColor(normalGreen); defaultBg.setCornerRadius(radius); defaultBg.setStroke(dp2px(2), strokeColor);
+
+        android.graphics.drawable.GradientDrawable pressedBg = new android.graphics.drawable.GradientDrawable();
+        pressedBg.setColor(pressedGreen); pressedBg.setCornerRadius(radius); pressedBg.setStroke(dp2px(2), strokeColor);
+
+        android.graphics.drawable.GradientDrawable disabledBg = new android.graphics.drawable.GradientDrawable();
+        disabledBg.setColor(disabledGray); disabledBg.setCornerRadius(radius); disabledBg.setStroke(dp2px(2), strokeColor);
+
+        android.graphics.drawable.StateListDrawable magicStates = new android.graphics.drawable.StateListDrawable();
+        magicStates.addState(new int[]{-android.R.attr.state_enabled}, disabledBg);
+        magicStates.addState(new int[]{android.R.attr.state_pressed}, pressedBg);
+        magicStates.addState(new int[]{}, defaultBg);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            btnJump.setBackground(magicStates);
+        } else {
+            btnJump.setBackgroundDrawable(magicStates);
+        }
+
+        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp2px(45));
+        btnParams.setMargins(dp2px(15), dp2px(5), dp2px(15), dp2px(5));
+        btnJump.setLayoutParams(btnParams);
+
+        // --- 点击事件与核心 Root 逻辑 ---
+        btnJump.setOnClickListener(v -> {
+            btnJump.setText("✨ 执行中... ");
+            btnJump.setEnabled(false); // 触发变灰的圆角拟态状态
+
+            new Thread(() -> {
+                try {
+                    // 1. 关闭系统【自动确定时间】开关
+                    execRootCmd("settings put global auto_time 0");
+
+                    // 2. 【核心修改】计算当前时间 + 60秒 (60000毫秒)
+                    long targetTime = System.currentTimeMillis() + 60000;
+
+                    // 3. 转换成安卓底层 date 命令支持的标准格式 (月日时分年.秒)
+                    java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("MMddHHmmyyyy.ss");
+                    String timeStr = sdf.format(new java.util.Date(targetTime));
+
+                    // 4. 用 Root 强行修改底层时间，并发送广播通知游戏引擎
+                    execRootCmd("date " + timeStr);
+                    execRootCmd("am broadcast -a android.intent.action.TIME_SET");
+
+                    // 5. 让跳跃后的时间维持 1.5 秒，确保游戏卡出 Bug、跳过倒计时
+                    Thread.sleep(1500);
+
+                    // 6. 重新打开【自动确定时间】开关，系统会瞬间联网恢复真实时间
+                    execRootCmd("settings put global auto_time 1");
+                    execRootCmd("am broadcast -a android.intent.action.TIME_SET");
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    // 恢复按钮状态
+                    new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                        btnJump.setEnabled(true);
+                        btnJump.setText("✨ " + title);
+                        Toast.makeText(FloatWindowService.this, "已校准", Toast.LENGTH_SHORT).show();
+                    });
+                }
+            }).start();
+        });
+
+        blockLayout.addView(btnJump);
+        return blockLayout;
+    }
 
 }
