@@ -377,22 +377,23 @@ public class FloatWindowService extends Service {
         // 教学：Lua 里的数组是 {123, 456, 789}，Java 里就在后面加个 L 代表长整数就行
         // 请你打开你的 视野.lua，把 readPointer 后面的那个大括号里的数字抄进来！
 
-        final long[] offsets = {0x1CC60L, 0x168L, 0x3C8L, 0xA8L, 0x28L, 0x74L};
+        final long[] offsets = {0x25AE0L, 0x88L, 0xD0L, 0x468L, 0x7DCL};
         // 勾选框事件
         checkBox.setOnCheckedChangeListener((btn, isChecked) -> {
             controlPanel.setVisibility(isChecked ? View.VISIBLE : View.GONE);
             if (isChecked) {
-                // 读取滑动条进度，计算实际视野并写入
-                float currentFov = 1.5f + (seekBar.getProgress() / 10.0f);
-                MemoryManager.writePointerChainFloatOnce(
-                        FloatWindowService.this, TARGET_PKG, "libunity.so", offsets, currentFov
+                float currentFov = 0.5f + (seekBar.getProgress() / 10.0f);
+
+                // 【修改点 2】: 开启时，调用我们新写的带检测的 writeFovWithCheck 方法
+                // 目标模块改成 "libil2cpp.so"，并告诉它预期默认值是 0.5f
+                MemoryManager.writeFovWithCheck(
+                        FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, 0.5f, currentFov
                 );
             } else {
-                // 取消勾选时，恢复为默认视野 1.0f
+                // 关闭时，直接恢复为 0.5f，目标模块改成 "libil2cpp.so"
                 MemoryManager.writePointerChainFloatOnce(
-                        FloatWindowService.this, TARGET_PKG, "libunity.so", offsets, 1.0f
+                        FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, 0.5f
                 );
-                showToast("视野扩大已关闭，恢复默认");
             }
         });
 
@@ -412,9 +413,12 @@ public class FloatWindowService extends Service {
 
                 // 如果当前功能处于勾选状态，松开手时顺便应用一下最新视野
                 if (checkBox.isChecked()) {
-                    float val = 1.5f + (sb.getProgress() / 10.0f);
+                    float val = 0.5f + (sb.getProgress() / 10.0f);
+
+                    // 【修改点 3】: 滑动条松开时的实时写入，目标模块改成 "libil2cpp.so"
+                    // 这里不用带检测的方法，因为此时数值已经被我们自己修改过了，肯定不是 0.5f 了
                     MemoryManager.writePointerChainFloatOnce(
-                            FloatWindowService.this, TARGET_PKG, "libunity.so", offsets, val
+                            FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, val
                     );
                 }
             }

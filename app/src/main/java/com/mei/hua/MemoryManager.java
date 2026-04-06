@@ -261,6 +261,63 @@ public class MemoryManager {
             }
         }).start();
     }
+    /**
+     * 【新增】：解链并读取原来的 Float 值，如果不符合预期则提示，最后写入新值
+     */
+    public static void writeFovWithCheck(Context context, String pkgName, String moduleName, long[] offsets, float expectedDefault, float finalValue) {
+        new Thread(() -> {
+            int pid = getProcessID(pkgName);
+            if (pid == -1) return;
+
+            // 获取该模块所有的 rw-p 段（配合bss）
+            List<Long> bases = getModuleBases(pid, moduleName);
+            if (bases.isEmpty()) return;
+
+            boolean success = false;
+            for (int i = 0; i < bases.size(); i++) {
+                long currentAddr = bases.get(i) + offsets[0];
+                boolean isValidChain = true;
+
+                // 逐级读取指针进行解链
+                for (int j = 1; j < offsets.length; j++) {
+                    long nextPtr = readPointer64(pid, currentAddr);
+                    if (nextPtr == 0) {
+                        isValidChain = false;
+                        break;
+                    }
+                    currentAddr = nextPtr + offsets[j];
+                }
+
+                // 成功解到最后一条链
+                if (isValidChain && currentAddr != 0) {
+                    // 1. 先读取当前内存中的旧值（获取低32位并转为 Float）
+                    long val64 = readPointer64(pid, currentAddr);
+                    float originalValue = Float.intBitsToFloat((int) (val64 & 0xFFFFFFFFL));
+
+                    // 2. 检查是否等于预期的默认值 (0.5f)
+                    // 浮点数有精度误差，我们用差值的绝对值判断 (> 0.01f 就算不相等)
+                    if (Math.abs(originalValue - expectedDefault) > 0.01f) {
+                        float finalOriginalValue = originalValue;
+                        new Handler(Looper.getMainLooper()).post(() ->
+                                Toast.makeText(context, "⚠️ 警告：检测到原视野值为 " + finalOriginalValue + "\n可能基址已失效或被其他功能占用！", Toast.LENGTH_LONG).show()
+                        );
+                    }
+
+                    // 3. 写入你设定的新的视野值
+                    writeMemoryFloat(pid, currentAddr, finalValue);
+                    success = true;
+                    break;
+                }
+            }
+
+            // 提示修改结果
+            if (success) {
+                new Handler(Looper.getMainLooper()).post(() ->
+                        Toast.makeText(context, "视野已修改为: " + finalValue, Toast.LENGTH_SHORT).show()
+                );
+            }
+        }).start();
+    }
     public static void startFreezePointerChain(Context context, String key, String pkgName, String moduleName, long[] offsets, int finalValue) {
         stopFreeze(key);
 
