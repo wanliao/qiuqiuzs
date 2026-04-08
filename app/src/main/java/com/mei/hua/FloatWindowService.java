@@ -168,12 +168,13 @@ public class FloatWindowService extends Service {
         contentArea.setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10));
 
         // 加载功能模块
-        // ... 之前添加的视野扩大等功能
+
         contentArea.addView(createTimeJumpBlock("时间跳跃"));
         contentArea.addView(createSpeedControlBlock("全局变速"));
         contentArea.addView(createExitButtonBlock());
         contentArea.addView(createFov2ControlBlock("视野1"));
         contentArea.addView(createFovControlBlock("视野2"));
+        contentArea.addView(createSpitAccelBlock("测试功能(勿开)"));
 
 
         floatingMenu.addView(contentArea);
@@ -329,102 +330,98 @@ public class FloatWindowService extends Service {
     /**
      * 【教学用】：创建带记忆功能的“视野扩大”模块
      */
+    /**
+     * 真正的视野2模块：
+     * 勾选 -> 执行 libsiuy.so
+     * 取消勾选 -> 执行 liboins.so (恢复/修改地址)
+     */
     private View createFovControlBlock(String title) {
         LinearLayout blockLayout = new LinearLayout(this);
         blockLayout.setOrientation(LinearLayout.VERTICAL);
         blockLayout.setPadding(0, dp2px(5), 0, dp2px(5));
 
         CheckBox checkBox = new CheckBox(this);
-        checkBox.setText(title);
+        checkBox.setText(title + " (备用)");
         checkBox.setTextColor(COLOR_TEXT);
         checkBox.setTextSize(13);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             checkBox.setButtonTintList(ColorStateList.valueOf(COLOR_ACCENT));
         }
 
-        LinearLayout controlPanel = new LinearLayout(this);
-        controlPanel.setOrientation(LinearLayout.VERTICAL);
-        controlPanel.setVisibility(View.GONE);
-        controlPanel.setPadding(dp2px(25), dp2px(5), 0, dp2px(5));
-
-        TextView tvValue = new TextView(this);
-        tvValue.setTextColor(Color.parseColor("#AAAAAA"));
-        tvValue.setTextSize(11);
-
-        // 初始化滑动条 (0~35 对应 1.5~5.0)
-        SeekBar seekBar = new SeekBar(this);
-        seekBar.setMax(35);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            seekBar.setProgressTintList(ColorStateList.valueOf(COLOR_ACCENT));
-            seekBar.setThumbTintList(ColorStateList.valueOf(COLOR_ACCENT));
-        }
-
-        // ================= 记忆功能核心 =================
-        // 读取保存的进度，如果没有存过，默认是 0（也就是 1.5）
-        int savedProgress = sp.getInt("FOV_PROGRESS", 0);
-        seekBar.setProgress(savedProgress);
-
-        // 初始化显示的文本
-        float initialFov = 1.5f + (savedProgress / 10.0f);
-        tvValue.setText("当前视野: " + initialFov);
-
-        controlPanel.addView(tvValue);
-        controlPanel.addView(seekBar);
-        blockLayout.addView(checkBox);
-        blockLayout.addView(controlPanel);
-
-        // ================= 这里是填写 Lua 偏移量的地方 =================
-        // 教学：Lua 里的数组是 {123, 456, 789}，Java 里就在后面加个 L 代表长整数就行
-        // 请你打开你的 视野.lua，把 readPointer 后面的那个大括号里的数字抄进来！
-
-        final long[] offsets = {0x25AE0L, 0x88L, 0xD0L, 0x468L, 0x7DCL};
-        // 勾选框事件
         checkBox.setOnCheckedChangeListener((btn, isChecked) -> {
-            controlPanel.setVisibility(isChecked ? View.VISIBLE : View.GONE);
             if (isChecked) {
-                float currentFov = 0.5f + (seekBar.getProgress() / 10.0f);
+                // ================= 开启时：执行 libsiuy.so =================
+                new Thread(() -> {
+                    String exePath = copyAssetToCache("libsiuy.so");
+                    if (exePath != null) {
+                        execRootCmd("chmod 777 " + exePath);
+                        execRootCmd("su -c " + exePath);
 
-                // 【修改点 2】: 开启时，调用我们新写的带检测的 writeFovWithCheck 方法
-                // 目标模块改成 "libil2cpp.so"，并告诉它预期默认值是 0.5f
-                MemoryManager.writeFovWithCheck(
-                        FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, 0.5f, currentFov
-                );
+                        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                            Toast.makeText(FloatWindowService.this, "视野2已开启：成功运行 libsiuy", Toast.LENGTH_SHORT).show();
+                        });
+                    } else {
+                        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                            Toast.makeText(FloatWindowService.this, "开启失败，assets缺少 libsiuy.so", Toast.LENGTH_LONG).show();
+                            checkBox.setChecked(false);
+                        });
+                    }
+                }).start();
             } else {
-                // 关闭时，直接恢复为 0.5f，目标模块改成 "libil2cpp.so"
-                MemoryManager.writePointerChainFloatOnce(
-                        FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, 0.5f
-                );
+                // ================= 关闭时：执行 liboins.so =================
+                new Thread(() -> {
+                    // 尝试杀掉之前开启的程序，防止冲突
+                    execRootCmd("pkill -f libsiuy.so");
+
+                    // 提取恢复用的文件 liboins.so
+                    String restorePath = copyAssetToCache("liboins.so");
+                    if (restorePath != null) {
+                        // 赋予权限并执行
+                        execRootCmd("chmod 777 " + restorePath);
+                        execRootCmd("su -c " + restorePath);
+
+                        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                            Toast.makeText(FloatWindowService.this, "视野2已关闭：成功运行 liboins", Toast.LENGTH_SHORT).show();
+                        });
+                    } else {
+                        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                            Toast.makeText(FloatWindowService.this, "关闭失败，assets缺少 liboins.so", Toast.LENGTH_LONG).show();
+                        });
+                    }
+                }).start();
             }
         });
 
-        // 滑动条事件
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                float val = 1.5f + (progress / 10.0f);
-                tvValue.setText("当前视野: " + val);
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-
-            @Override
-            public void onStopTrackingTouch(SeekBar sb) {
-                // 【松开手时】保存当前滑动条的位置到 SharedPreferences
-                sp.edit().putInt("FOV_PROGRESS", sb.getProgress()).apply();
-
-                // 如果当前功能处于勾选状态，松开手时顺便应用一下最新视野
-                if (checkBox.isChecked()) {
-                    float val = 0.5f + (sb.getProgress() / 10.0f);
-
-                    // 【修改点 3】: 滑动条松开时的实时写入，目标模块改成 "libil2cpp.so"
-                    // 这里不用带检测的方法，因为此时数值已经被我们自己修改过了，肯定不是 0.5f 了
-                    MemoryManager.writePointerChainFloatOnce(
-                            FloatWindowService.this, TARGET_PKG, "libil2cpp.so", offsets, val
-                    );
-                }
-            }
-        });
-
+        blockLayout.addView(checkBox);
         return blockLayout;
+    }
+    /**
+     * 辅助工具：把 assets 里的文件复制到手机本地，方便后续执行
+     */
+    private String copyAssetToCache(String fileName) {
+        try {
+            // 获取缓存目录，将文件放到这里
+            java.io.File cacheFile = new java.io.File(getCacheDir(), fileName);
+
+            // 如果文件不存在，就从 assets 复制出来
+            if (!cacheFile.exists()) {
+                java.io.InputStream is = getAssets().open(fileName);
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(cacheFile);
+                byte[] buffer = new byte[1024];
+                int length;
+                while ((length = is.read(buffer)) > 0) {
+                    fos.write(buffer, 0, length);
+                }
+                fos.flush();
+                fos.close();
+                is.close();
+            }
+            // 返回本地文件的绝对路径（类似 /data/user/0/com.mei.hua/cache/libsiuy.so）
+            return cacheFile.getAbsolutePath();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null; // 发生错误返回空
+        }
     }
     /**
      * 视野扩大2 模块 (带独立记忆与单次修改)
@@ -554,7 +551,68 @@ public class FloatWindowService extends Service {
             }
         });
     }
+    /**
+     * 新增：吐球加速模块 (单向开启)
+     * 开启 -> 执行 libtmxqu.so
+     * 关闭 -> 提示无法关闭，并保持勾选状态
+     */
+    private View createSpitAccelBlock(String title) {
+        LinearLayout blockLayout = new LinearLayout(this);
+        blockLayout.setOrientation(LinearLayout.VERTICAL);
+        blockLayout.setPadding(0, dp2px(5), 0, dp2px(5));
 
+        CheckBox checkBox = new CheckBox(this);
+        checkBox.setText(title);
+        checkBox.setTextColor(COLOR_TEXT);
+        checkBox.setTextSize(13);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            checkBox.setButtonTintList(ColorStateList.valueOf(COLOR_ACCENT));
+        }
+
+        // 这是一个小技巧：用来防止程序自己把勾选框改回“打勾”状态时，又重复执行一遍开启代码
+        final boolean[] isForcingCheck = {false};
+
+        checkBox.setOnCheckedChangeListener((btn, isChecked) -> {
+            // 如果是我们代码强制让它保持打勾触发的，就直接跳过，啥也不干
+            if (isForcingCheck[0]) {
+                isForcingCheck[0] = false;
+                return;
+            }
+
+            if (isChecked) {
+                // ================= 开启时：执行 libtmxqu.so =================
+                new Thread(() -> {
+                    String exePath = copyAssetToCache("libtmxqu.so");
+                    if (exePath != null) {
+                        execRootCmd("chmod 777 " + exePath);
+                        execRootCmd("su -c " + exePath);
+
+                        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                            Toast.makeText(FloatWindowService.this, "吐球加速已成功开启！", Toast.LENGTH_SHORT).show();
+                        });
+                    } else {
+                        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                            Toast.makeText(FloatWindowService.this, "开启失败，assets缺少 libtmxqu.so", Toast.LENGTH_LONG).show();
+                            // 如果因为缺文件导致开启失败，那还是允许取消打勾的
+                            isForcingCheck[0] = true;
+                            checkBox.setChecked(false);
+                        });
+                    }
+                }).start();
+            } else {
+                // ================= 取消勾选时：拦截并提示 =================
+                // 弹窗提示用户
+                Toast.makeText(FloatWindowService.this, "该功能开启后无法关闭！", Toast.LENGTH_SHORT).show();
+
+                // 重点：强制把勾选框重新打上勾
+                isForcingCheck[0] = true;
+                checkBox.setChecked(true);
+            }
+        });
+
+        blockLayout.addView(checkBox);
+        return blockLayout;
+    }
     private void showToast(String msg) {
         android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
         handler.post(() -> Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_SHORT).show());
