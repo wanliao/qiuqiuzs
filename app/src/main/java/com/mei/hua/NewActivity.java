@@ -66,6 +66,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -94,6 +96,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     private static final int TYPE_ACTIVITY = 3;
     private static final int TYPE_ADD_EXIT = 4;
     private static final int TYPE_AUTO_VERSION = 5;
+    private static final int TYPE_UNZIP = 6;
 
     // UI 组件
     private View layoutPermissionContainer;
@@ -398,11 +401,44 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         if (id == R.id.button_android_auth) openDataDirectory();
         else if (id == R.id.button_shizuku) handleShizuku();
         else if (id == R.id.button_root) handleRoot();
-        else if (id == R.id.button_delete_file) combinedDeleteFile();
+        else if (id == R.id.button_delete_file) showHelpDialog();
         else if (id == R.id.tv_skip_auth || id == R.id.tv_goto_other) startActivity(new Intent(this, OtherActivity.class));
         else if (id == R.id.button_float_window) startMemoryHackProcess();
     }
+    // ==========================================
+    // 新增：获取使用帮助并使用拟态弹窗展示
+    // ==========================================
+    private void showHelpDialog() {
+        Toast.makeText(this, "正在获取帮助文档...", Toast.LENGTH_SHORT).show();
 
+        Request request = new Request.Builder()
+                .url("http://156.243.244.97/share/ggao.txt")
+                .get()
+                .build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                runOnUiThread(() -> Toast.makeText(NewActivity.this, "获取帮助失败，请检查网络", Toast.LENGTH_SHORT).show());
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful() || response.body() == null) {
+                    runOnUiThread(() -> Toast.makeText(NewActivity.this, "获取失败：服务器响应异常", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+
+                // 读取获取到的纯文本
+                String helpText = response.body().string();
+
+                runOnUiThread(() -> {
+                    // 复用现有的高级拟态弹窗显示文本，因为只是查看帮助，点击确定不需要执行额外操作，所以传入 null
+                    showNeuDialog("使用帮助", helpText, null);
+                });
+            }
+        });
+    }
     private void initFunctionConfigs() {
         functionConfigs.clear();
         functionConfigs.add(new FunctionConfig("去蓝雾", "naiteaone.d", "files/vercache2022/android/common/data/alltextures/map1/caocongnew.unity3d_u_4", "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", TYPE_COPY));
@@ -413,6 +449,7 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         functionConfigs.add(new FunctionConfig("退出按钮", "", "", "files/vercache2022/android/ver.xml", TYPE_ADD_EXIT));
         functionConfigs.add(new FunctionConfig("逃杀刺透", "naiteone.hu", "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", "files/vercache2022/android/common/data/alltextures/ingameeffect/ciqiu_dataosha.unity3d_u_4", TYPE_COPY));
         functionConfigs.add(new FunctionConfig("自动版本号", "", "", "", TYPE_AUTO_VERSION));
+        functionConfigs.add(new FunctionConfig("去蓝雾(留坑)", "libubsilyq.zip", "files/vercache2022/android/common/data/alltextures", "files/vercache2022/android/common/data/alltextures/map1|files/vercache2022/android/common/data/alltextures/map6", TYPE_UNZIP));
     }
 
     private int dpToPx(int dp) { return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()); }
@@ -509,7 +546,103 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.85), ViewGroup.LayoutParams.WRAP_CONTENT);
         dialog.show();
     }
+    // ==========================================
+    // 新增：解压并注入功能逻辑
+    // ==========================================
+    private void processUnzip(FunctionConfig config) {
+        Toast.makeText(this, "正在处理，请稍候...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                // 压缩包在本地 assets 释放后的路径
+                File zipFile = new File(getExternalFilesDir(null), config.sourceAssetName);
+                if (!zipFile.exists()) {
+                    runOnUiThread(() -> Toast.makeText(this, "资源缺失；请清除小助手应用数据: " + config.sourceAssetName, Toast.LENGTH_SHORT).show());
+                    return;
+                }
 
+                // 1. 先解压到本地临时目录
+                File tempDir = new File(getExternalFilesDir(null), "temp_unzip");
+                if (tempDir.exists()) {
+                    deleteRecursive(tempDir);
+                }
+                tempDir.mkdirs();
+
+                unzipFile(zipFile, tempDir);
+
+                // 2. 将临时目录内的文件遍历，并通过现有权限方法复制到 Android/data 目标目录
+                boolean allSuccess = copyDirectoryToAndroidData(tempDir, config.targetRelativePath);
+
+                // 3. 清理本地临时解压目录
+                deleteRecursive(tempDir);
+
+                if (allSuccess) {
+                    runOnUiThread(() -> Toast.makeText(this, config.btnName + " 成功！", Toast.LENGTH_SHORT).show());
+                } else {
+                    runOnUiThread(() -> Toast.makeText(this, config.btnName + " 部分文件注入失败，请检查授权", Toast.LENGTH_LONG).show());
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                runOnUiThread(() -> Toast.makeText(this, "解压发生异常: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    // 辅助方法：标准 Java ZIP 解压
+    private void unzipFile(File zipFile, File targetDir) throws Exception {
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFile))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                File newFile = new File(targetDir, entry.getName());
+                if (entry.isDirectory()) {
+                    newFile.mkdirs();
+                } else {
+                    newFile.getParentFile().mkdirs();
+                    try (FileOutputStream fos = new FileOutputStream(newFile)) {
+                        byte[] buffer = new byte[8192];
+                        int len;
+                        while ((len = zis.read(buffer)) > 0) {
+                            fos.write(buffer, 0, len);
+                        }
+                    }
+                }
+                zis.closeEntry();
+            }
+        }
+    }
+
+    // 辅助方法：递归将目录内的文件注入到 Android/data (复用你已有的 copyToAndroidData)
+    private boolean copyDirectoryToAndroidData(File sourceDir, String targetRelativeBase) {
+        boolean allSuccess = true;
+        File[] files = sourceDir.listFiles();
+        if (files == null) return true;
+
+        for (File file : files) {
+            String relativePath = targetRelativeBase + "/" + file.getName();
+            if (file.isDirectory()) {
+                if (!copyDirectoryToAndroidData(file, relativePath)) {
+                    allSuccess = false;
+                }
+            } else {
+                if (!copyToAndroidData(file, relativePath)) {
+                    allSuccess = false;
+                }
+            }
+        }
+        return allSuccess;
+    }
+
+    // 辅助方法：递归删除本地临时文件
+    private void deleteRecursive(File fileOrDirectory) {
+        if (fileOrDirectory.isDirectory()) {
+            File[] children = fileOrDirectory.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        fileOrDirectory.delete();
+    }
     private void generateFunctionButtons() {
         gridLayoutFunctions.removeAllViews();
         for (int i = 0; i < functionConfigs.size(); i++) {
@@ -542,12 +675,16 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                             createAutoVersionShortcut(name);
                         });
                         break;
+                    case TYPE_UNZIP: // 新增：处理解压
+                        processUnzip(config);
+                        break;
                     case TYPE_COPY: default: combinedCopyAndVerifyFile(config); break;
                 }
             });
 
             container.addView(btn);
 
+            // 【修改1】把上一轮加的 && config.type != TYPE_UNZIP 去掉，让“留坑”也显示垃圾桶
             if (config.type != TYPE_AUTO_VERSION) {
                 ImageView iconDelete = new ImageView(this);
                 iconDelete.setImageResource(android.R.drawable.ic_menu_delete);
@@ -560,8 +697,18 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
                     showNeuDialog("确认删除", "是否要清理\n【" + config.btnName + "】？", () -> {
                         Toast.makeText(this, "正在清理...", Toast.LENGTH_SHORT).show();
                         new Thread(() -> {
-                            boolean success = deleteFromAndroidData(config.deleteRelativePath);
-                            runOnUiThread(() -> Toast.makeText(this, success ? "清理成功" : "文件已不存在", Toast.LENGTH_SHORT).show());
+                            boolean allSuccess = true;
+                            // 【修改2】通过 "|" 分隔符切分多个路径，依次执行删除
+                            String[] paths = config.deleteRelativePath.split("\\|");
+                            for (String path : paths) {
+                                if (!path.trim().isEmpty()) {
+                                    if (!deleteFromAndroidData(path.trim())) {
+                                        allSuccess = false; // 只要有一个路径删除失败，就标记为 false
+                                    }
+                                }
+                            }
+                            boolean finalAllSuccess = allSuccess;
+                            runOnUiThread(() -> Toast.makeText(this, finalAllSuccess ? "清理成功" : "部分清理失败或文件已不存在", Toast.LENGTH_SHORT).show());
                         }).start();
                     });
                 });
@@ -1036,8 +1183,15 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
 
     private boolean deleteFromAndroidData(String relativePath) {
         String fullPath = "/storage/emulated/0/Android/data/" + TARGET_PKG + "/" + relativePath;
-        if (executePrivilegedCommand("rm -f \"" + fullPath + "\"")) return true;
-        try { DocumentFile target = getDocumentFileSafely(relativePath, false, false); if (target != null && target.exists()) return target.delete(); } catch(Exception e) {} return false;
+        // 【重要修改】将原来的 rm -f 改为 rm -rf，这样才能强制删除整个文件夹及其内部文件
+        if (executePrivilegedCommand("rm -rf \"" + fullPath + "\"")) return true;
+
+        try {
+            DocumentFile target = getDocumentFileSafely(relativePath, false, false);
+            if (target != null && target.exists()) return target.delete();
+        } catch(Exception e) {}
+
+        return false;
     }
 
     private DocumentFile getDocumentFileSafely(String relativePath, boolean createIfMissing, boolean isDirectory) {
@@ -1085,9 +1239,33 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
     private void checkHasPermission() {
         boolean shizukuOk = false;
         try { if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) shizukuOk = true; } catch (Throwable t) {}
-        if (shizukuOk || new RootBeer(this).isRooted()) { updatePermissionStatus(true); return; }
+
+        // 【修改1：严格验证Root】不能只靠检测系统环境，要真实执行su命令测试本软件是否拿到Root
+        boolean rootOk = false;
+        if (new RootBeer(this).isRooted()) {
+            try {
+                Process p = Runtime.getRuntime().exec("su");
+                DataOutputStream os = new DataOutputStream(p.getOutputStream());
+                os.writeBytes("id\nexit\n");
+                os.flush();
+                if (p.waitFor() == 0) rootOk = true;
+            } catch (Exception e) {}
+        }
+
+        if (shizukuOk || rootOk) { updatePermissionStatus(true); return; }
+
+        // 【修改2：严格验证SAF缓存】不仅要能读，还必须验证文件夹名字是不是真的球球目录
         String uriStr = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(DATA_URI_KEY, null);
-        if (uriStr != null) { try { if (DocumentFile.fromTreeUri(this, Uri.parse(uriStr)).canRead()) { updatePermissionStatus(true); return; } } catch (Exception e) {} }
+        if (uriStr != null) {
+            try {
+                DocumentFile df = DocumentFile.fromTreeUri(this, Uri.parse(uriStr));
+                if (df != null && df.canRead() && TARGET_PKG.equals(df.getName())) {
+                    updatePermissionStatus(true); return;
+                }
+            } catch (Exception e) {}
+        }
+
+        // 都不满足，老老实实显示授权界面
         updatePermissionStatus(false);
     }
 
@@ -1105,11 +1283,39 @@ public class NewActivity extends AppCompatActivity implements View.OnClickListen
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_ASSETS_COPIED, true).apply();
     }
 
+    // ==========================================
+    // 修改：直接跳转到目标目录的 SAF 授权
+    // ==========================================
+    // ==========================================
+    // 修改：直接跳转到目标目录的 SAF 授权，并正确接管回调
+    // ==========================================
     private void openDataDirectory() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Android/data"));
-        Toast.makeText(this, "请授权 " + TARGET_PKG + " 目录", Toast.LENGTH_LONG).show(); openDirectoryLauncher.launch(intent);
+        intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+
+        String targetPath = "Android%2Fdata%2Fcom.ztgame.bob";
+        Uri documentUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3A" + targetPath);
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI, documentUri);
+        }
+
+        try {
+            // 【重要修复】：这里必须用 openDirectoryLauncher 启动，原有的持久化保存代码才会执行！
+            openDirectoryLauncher.launch(intent);
+            Toast.makeText(this, "请直接点击底部的【使用此文件夹】，如果提示隐私那么就放弃这种方式授权", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "你的系统不支持直接跳转，请手动寻找com.ztgame.bob目录", Toast.LENGTH_SHORT).show();
+            // 降级兼容：普通打开方式
+            Intent fallbackIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            openDirectoryLauncher.launch(fallbackIntent);
+        }
     }
+
 
     private void handleShizuku() {
         try {

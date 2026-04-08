@@ -49,7 +49,8 @@ public class MainActivity extends AppCompatActivity {
     String WEIKEY = "w6bf22ad03ec445293fa400d9b7cb25";
     String RC4KEY = "pcec1bd6e6de1083215cecda4ae5284";
     String DLCODE = "200";
-    String EDITION = "2.0";
+    String EDITION = "3.0";
+    private boolean hasUpdate = false;
 
     // 免责声明文本
     private static final String DISCLAIMER_TEXT =
@@ -119,10 +120,6 @@ public class MainActivity extends AppCompatActivity {
         String savedKami = sp.getString("last_kami", "");
         if (!savedKami.isEmpty()) {
             kami.setText(savedKami);
-            // 只有当“已勾选”且“有卡密”时，才尝试自动登录
-            if (isAgreed) {
-                login(null);
-            }
         }
 
         update();
@@ -167,18 +164,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // 检测更新 (核心逻辑未改动)
+    // 检测更新
     public void update() {
         Http.get(WEIURL + "/api/?id=ini&app=" + WEIAID, new Callback() {
             @Override
-            public void onFailure(@NotNull Call call, @NotNull IOException e) {}
+            public void onFailure(@NotNull Call call, @NotNull IOException e) {
+                attemptAutoLogin(); // 网络失败也放行自动登录尝试
+            }
 
             @Override
             public void onResponse(@NotNull Call call, @NotNull Response response) {
                 try {
-                    if (response.body() == null) return;
+                    if (response.body() == null) {
+                        attemptAutoLogin();
+                        return;
+                    }
                     String body = response.body().string();
                     String WEIINI = Rc4Util.decryRC4(body, RC4KEY, "UTF-8");
                     JSONObject jsonObject = new JSONObject(WEIINI);
+
                     if (jsonObject.getString("code").equals("200")) {
                         JSONObject json = new JSONObject(jsonObject.getString("msg"));
                         String version = json.getString("version");
@@ -187,6 +191,8 @@ public class MainActivity extends AppCompatActivity {
                         String app_update_must = json.getString("app_update_must");
 
                         if (!version.equals(EDITION)) {
+                            hasUpdate = true; // 【关键】：标记检测到了更新，后续不再允许跳转
+
                             runOnUiThread(() -> {
                                 try {
                                     AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this)
@@ -206,11 +212,26 @@ public class MainActivity extends AppCompatActivity {
                                     e.printStackTrace();
                                 }
                             });
+                        } else {
+                            // 版本一致，没有更新，安全执行自动登录
+                            attemptAutoLogin();
                         }
+                    } else {
+                        attemptAutoLogin();
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
+                    attemptAutoLogin();
                 }
+            }
+        });
+    }
+
+    // 【新增】辅助方法：只有在安全的情况下才触发自动登录
+    private void attemptAutoLogin() {
+        runOnUiThread(() -> {
+            if (cbAgree.isChecked() && !kami.getText().toString().isEmpty()) {
+                login(null);
             }
         });
     }

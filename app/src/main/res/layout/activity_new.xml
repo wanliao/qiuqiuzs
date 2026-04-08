@@ -244,7 +244,7 @@
                         android:layout_weight="1"
                         android:background="@drawable/bg_neu_btn"
                         android:stateListAnimator="@null"
-                        android:text="重置资源"
+                        android:text="使用帮助"
                         android:textColor="#4A5568"
                         android:textSize="15sp"
                         android:textStyle="bold" />
